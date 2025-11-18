@@ -1,27 +1,35 @@
-FROM node:20-alpine
+# ─── FRONTEND BUILD ─────────────────────────────────────────────
+FROM node:18 AS frontend
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend .
+RUN npm run build
+
+
+# ─── BACKEND BUILD ─────────────────────────────────────────────
+FROM node:18 AS backend
+WORKDIR /app/backend
+COPY backend/package*.json ./
+RUN npm install
+COPY backend .
+
+
+# ─── FINAL IMAGE (NODE + STATIC SERVE) ─────────────────────────
+FROM node:18
 
 WORKDIR /app
 
-# ------- BACKEND -------
-COPY backend/package*.json ./
-RUN npm install --omit=dev
-COPY backend ./
+# Copy backend
+COPY --from=backend /app/backend ./
 
-# ------- FRONTEND -------
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm install
-COPY frontend ./frontend/
-RUN cd frontend && npm run build
-
-# przerzucamy build do /public
+# Copy built frontend into backend public folder
 RUN mkdir -p public
-RUN cp -r frontend/dist/* public/
+COPY --from=frontend /app/frontend/dist ./public
 
-# ------- ENV / PORT -------
-ENV NODE_ENV=production
-ENV PORT=5000
-ENV HOST=0.0.0.0
+# Install production process manager
+RUN npm install -g pm2
 
-EXPOSE 5000
+EXPOSE 3000
 
-CMD ["node", "server.js"]
+CMD ["pm2-runtime", "index.js"]
