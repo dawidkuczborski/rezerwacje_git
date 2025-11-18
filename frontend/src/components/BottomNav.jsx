@@ -27,7 +27,8 @@ export default function BottomNav() {
 
   useEffect(() => {
     if (location.pathname.startsWith("/salons")) setActiveIndex(0);
-    else if (location.pathname.startsWith("/appointments")) setActiveIndex(1);
+    else if (location.pathname.startsWith("/calendar")) setActiveIndex(1);
+
     else if (location.pathname.startsWith("/profile")) setActiveIndex(2);
   }, [location.pathname]);
 

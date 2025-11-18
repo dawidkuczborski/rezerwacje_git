@@ -73,7 +73,7 @@ function AppRoutes() {
     if (!isLoggedIn || !backendUser) return "/login";
     if (backendUser.is_provider) return "/panel";
     if (backendUser.role === "employee") return "/employee/calendar";
-    if (backendUser.role === "client") return "/calendar";
+    if (backendUser.role === "client") return "/salons";
     return "/login";
   };
 

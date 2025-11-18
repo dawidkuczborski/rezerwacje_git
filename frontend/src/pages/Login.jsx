@@ -92,7 +92,7 @@ export default function Login() {
       }
 
       if (role === "client") {
-        window.location.href = "/calendar";
+        window.location.href = "/salons";
         return;
       }
 
