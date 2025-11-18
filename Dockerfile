@@ -1,28 +1,34 @@
+# Używamy Node 20, bo Vite wymaga min. Node 20.19+
 FROM node:20-alpine
+
+# Umożliwia budowę frontendu bez błędów (CI=true powoduje przerwanie builda)
+ENV CI=false
 
 WORKDIR /app
 
-# Install backend deps
+# ---------------- BACKEND ----------------
 COPY backend/package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
-# Copy backend source
 COPY backend ./
 
-# Install frontend deps
+# ---------------- FRONTEND ----------------
 COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm install
+WORKDIR /app/frontend
+RUN npm install --omit=dev
 
-# Copy frontend source
-COPY frontend ./frontend/
+# kopiujemy frontend
+COPY frontend ./
 
-# Build frontend (Vite)
-RUN cd frontend && npm run build
+# Budujemy frontend (tu powstaje /app/frontend/dist)
+RUN npm run build
 
-# Create public folder for serving static files
+# ---------------- MERGE FRONT + BACKEND ----------------
+WORKDIR /app
 RUN mkdir -p public
 RUN cp -r frontend/dist/* public/
 
+# ---------------- RUNTIME ----------------
 ENV PORT=5000
 ENV NODE_ENV=production
 
