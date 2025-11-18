@@ -4584,7 +4584,7 @@ app.get(
 // Test root
 //app.get("/", (req, res) => res.send("🚀 Backend (optimized local) działa poprawnie"));
 // -------------------- Serve React frontend --------------------
-const frontendPath = path.join(__dirname, "..", "frontend", "dist");
+const frontendPath = path.join(__dirname, "public");
 console.log("📁 Szukam frontendu w:", frontendPath);
 
 if (!fs.existsSync(frontendPath)) {
