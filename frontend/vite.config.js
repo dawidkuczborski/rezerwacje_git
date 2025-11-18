@@ -1,37 +1,47 @@
-# Używamy Node 20, bo Vite wymaga min. Node 20.19+
-FROM node:20-alpine
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 
-# Umożliwia budowę frontendu bez błędów (CI=true powoduje przerwanie builda)
-ENV CI=false
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
 
-WORKDIR /app
+      // 🔧 ważna poprawka — wcześniej było enabled: true
+      devOptions: {
+        enabled: process.env.NODE_ENV !== "production",
+      },
 
-# ---------------- BACKEND ----------------
-COPY backend/package*.json ./
-RUN npm install --omit=dev
+      manifest: {
+        name: "BarberBook",
+        short_name: "BarberBook",
+        description: "Rezerwuj wizyty u barberów i stylistów",
+        theme_color: "#1d1d1f",
+        background_color: "#1d1d1f",
+        display: "standalone",
+        start_url: "/",
+        icons: [
+          {
+            src: "pwa-192x192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: "pwa-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+        ],
+      },
+    }),
+  ],
 
-COPY backend ./
+  // 👇 to zostaje — naprawia `process is not defined` na froncie
+  define: {
+    "process.env": {},
+  },
 
-# ---------------- FRONTEND ----------------
-COPY frontend/package*.json ./frontend/
-WORKDIR /app/frontend
-RUN npm install --omit=dev
-
-# kopiujemy frontend
-COPY frontend ./
-
-# Budujemy frontend (tu powstaje /app/frontend/dist)
-RUN npm run build
-
-# ---------------- MERGE FRONT + BACKEND ----------------
-WORKDIR /app
-RUN mkdir -p public
-RUN cp -r frontend/dist/* public/
-
-# ---------------- RUNTIME ----------------
-ENV PORT=5000
-ENV NODE_ENV=production
-
-EXPOSE 5000
-
-CMD ["node", "server.js"]
+  // ⚠️ Jeśli kiedyś hostujesz w subfolderze — odkomentuj ↓
+  // base: "/",
+});
