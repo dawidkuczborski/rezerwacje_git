@@ -1,5 +1,5 @@
 import React from "react";
-import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
