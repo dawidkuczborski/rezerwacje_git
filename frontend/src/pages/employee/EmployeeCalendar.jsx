@@ -644,39 +644,49 @@ export default function EmployeeCalendar() {
   const backendBase = import.meta.env.VITE_API_URL;
 
   // Theme management (class-based, like w Twoim Login)
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
-  useEffect(() => {
-    const applyTheme = (th) => {
-      const dark = th === "dark";
-      const bg = dark ? "#0f0f10" : "#f9fafb";
-      const color = dark ? "#ffffff" : "#111827";
-      document.documentElement.classList.toggle("dark", dark);
-      document.body.style.background = bg;
-      document.body.style.color = color;
-      localStorage.setItem("theme", th);
-      const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute("content", bg);
-    };
-    applyTheme(theme);
-    const handleStorage = (e) => {
-      if (e.key === "theme" && e.newValue) setTheme(e.newValue);
-    };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, [theme]);
+    const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+
+
+
+    useEffect(() => {
+        const dark = theme === "dark";
+
+        const bg = dark ? "#0f0f10" : "#f9fafb";
+        const color = dark ? "#ffffff" : "#111827";
+
+        document.documentElement.classList.toggle("dark", dark);
+        document.body.style.background = bg;
+        document.body.style.color = color;
+
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", bg);
+
+    }, [theme]);
+
+    useEffect(() => {
+        const handler = () => {
+            setTheme(localStorage.getItem("theme") || "dark");
+        };
+
+        window.addEventListener("themeChanged", handler);
+
+        return () => window.removeEventListener("themeChanged", handler);
+    }, []);
 
   // dynamic styles object (for inline fallbacks & dynamic elements)
-  const styles = useMemo(() => {
-    const dark = theme === "dark";
-    return {
-      bgMain: dark ? "#0f0f10" : "#f9fafb",
-      bgPanel: dark ? "#0b0b0c" : "#ffffff",
-      panelBorder: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
-      text: dark ? "#ffffff" : "#111827",
-      subtext: dark ? "#9ca3af" : "#6b7280",
-      mutedBg: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)"
-    };
-  }, [theme]);
+    const styles = useMemo(() => {
+        const dark = theme === "dark";
+        return {
+            bgMain: dark ? "#0f0f10" : "#f9fafb",
+            bgPanel: dark ? "#0b0b0c" : "#ffffff",
+            panelBorder: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)",
+            text: dark ? "#ffffff" : "#111827",
+            subtext: dark ? "#9ca3af" : "#6b7280",
+            mutedBg: dark ? "rgba(255,255,255,0.03)" : "rgba(0,0,0,0.03)"
+        };
+    }, [theme]);
+
+
 
   const [payload, setPayload] = useState(() => {
   const cached = localStorage.getItem("calendar_cache");

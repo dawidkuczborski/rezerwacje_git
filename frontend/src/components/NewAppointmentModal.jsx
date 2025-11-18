@@ -35,7 +35,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
     const [creatingClient, setCreatingClient] = useState(false);
 
     const backendBase = import.meta.env.VITE_API_URL;
-
     const dropdownRef = useRef(null);
 
     const authHeaders = () => ({
@@ -46,11 +45,9 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         const filtered = (list || []).filter(
             (c) => c && c.id && (c.first_name || c.last_name || c.phone)
         );
-        const map = new Map();
-        filtered.forEach((c) => {
-            if (!map.has(c.id)) map.set(c.id, c);
-        });
-        return [...map.values()];
+        const unique = new Map();
+        filtered.forEach((c) => unique.set(c.id, c));
+        return [...unique.values()];
     };
 
     // LOAD DATA
@@ -87,7 +84,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
         try {
             const params = { employee_id: empId, service_id: srvId, date };
-
             if (addonList?.length) params.addons = addonList.join(",");
 
             const res = await axios.get(
@@ -117,7 +113,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         fetchSlots(form.employee_id, form.service_id, form.date, form.addons);
     }, [form.employee_id, form.service_id, form.date, JSON.stringify(form.addons)]);
 
-    // CREATE CLIENT – /api/clients/create-local
+    // ADD CLIENT
     const handleCreateClient = async () => {
         const { first_name, last_name, phone } = newClient;
 
@@ -151,7 +147,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         }
     };
 
-    // SAVE APPOINTMENT – /api/appointments/create-from-panel
+    // SAVE
     const handleSave = async () => {
         if (!form.client_id || !form.employee_id || !form.service_id || !form.start_time) {
             alert("Uzupełnij obowiązkowe pola!");
@@ -165,7 +161,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 `${backendBase}/api/appointments/create-from-panel`,
                 {
                     ...form,
-                    client_local_id: form.client_id, // 🔥 KLUCZOWA LINIJKA
+                    client_local_id: form.client_id,
                 },
                 authHeaders()
             );
@@ -185,7 +181,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         }
     };
 
-    // DROPDOWN CLOSE
+    // Close dropdown on outside-click
     useEffect(() => {
         const handler = (e) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -196,7 +192,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         return () => document.removeEventListener("mousedown", handler);
     }, []);
 
-    // FILTERED CLIENTS
     const filteredClients = clients.filter((c) => {
         if (!clientSearch) return true;
         const q = clientSearch.toLowerCase();
@@ -219,7 +214,8 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 <motion.div
                     initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full h-full max-w-3xl bg-white rounded-none md:rounded-2xl overflow-y-auto shadow-xl flex flex-col"
+                    className="w-full h-full max-w-3xl bg-white dark:bg-gray-900 dark:text-gray-100
+          rounded-none md:rounded-2xl overflow-y-auto shadow-xl flex flex-col"
                 >
                     {/* SUCCESS POPUP */}
                     {savedPopup && (
@@ -231,17 +227,20 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     {/* HEADER */}
                     <div className="sticky top-0 bg-orange-500 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
                         <h2 className="text-lg font-semibold">Nowa wizyta</h2>
-                        <button onClick={onClose}><X size={18} /></button>
+                        <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-lg">
+                            <X size={18} />
+                        </button>
                     </div>
 
                     {/* FORM */}
-                    <div className="flex-1 p-6 space-y-6 text-gray-800">
+                    <div className="flex-1 p-6 space-y-6 text-gray-800 dark:text-gray-100">
+
                         {/* CLIENT */}
-                        <div className="border-b pb-4 relative" ref={dropdownRef}>
-                            <label className="text-sm text-gray-500">Klient *</label>
+                        <div className="border-b pb-4 dark:border-gray-700 relative" ref={dropdownRef}>
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Klient *</label>
 
                             <div
-                                className="mt-2 border rounded-lg p-2 bg-white cursor-pointer"
+                                className="mt-2 border rounded-lg p-2 bg-white dark:bg-gray-800 dark:border-gray-700 cursor-pointer"
                                 onClick={() => setDropdownOpen((v) => !v)}
                             >
                                 {form.client_id
@@ -256,12 +255,12 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </div>
 
                             {dropdownOpen && (
-                                <div className="absolute w-full bg-white border rounded-lg shadow-xl mt-1 z-50">
-                                    <div className="p-2 border-b">
+                                <div className="absolute w-full bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl mt-1 z-50">
+                                    <div className="p-2 border-b dark:border-gray-700">
                                         <input
                                             autoFocus
                                             placeholder="Szukaj klienta…"
-                                            className="w-full border rounded-lg p-2 text-sm"
+                                            className="w-full border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
                                             value={clientSearch}
                                             onChange={(e) => setClientSearch(e.target.value)}
                                         />
@@ -271,7 +270,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                         {filteredClients.map((c) => (
                                             <div
                                                 key={c.id}
-                                                className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                                className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm"
                                                 onClick={() => {
                                                     setForm((p) => ({ ...p, client_id: c.id }));
                                                     setDropdownOpen(false);
@@ -283,14 +282,14 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                         ))}
 
                                         {filteredClients.length === 0 && (
-                                            <div className="px-3 py-2 text-gray-500 text-sm">
+                                            <div className="px-3 py-2 text-gray-500 dark:text-gray-400 text-sm">
                                                 Brak wyników
                                             </div>
                                         )}
                                     </div>
 
                                     <button
-                                        className="w-full flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 text-sm"
+                                        className="w-full flex items-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-600 dark:text-blue-300 text-sm"
                                         onClick={() => {
                                             setShowNewClientForm(true);
                                             setDropdownOpen(false);
@@ -302,10 +301,10 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             )}
 
                             {showNewClientForm && (
-                                <div className="p-3 mt-2 border rounded-lg bg-gray-50 space-y-2">
+                                <div className="p-3 mt-2 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700 space-y-2">
                                     <div className="flex gap-2">
                                         <input
-                                            className="flex-1 border rounded-lg p-2 text-sm"
+                                            className="flex-1 border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
                                             placeholder="Imię"
                                             value={newClient.first_name}
                                             onChange={(e) =>
@@ -313,7 +312,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                             }
                                         />
                                         <input
-                                            className="flex-1 border rounded-lg p-2 text-sm"
+                                            className="flex-1 border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
                                             placeholder="Nazwisko"
                                             value={newClient.last_name}
                                             onChange={(e) =>
@@ -323,7 +322,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                     </div>
 
                                     <input
-                                        className="w-full border rounded-lg p-2 text-sm"
+                                        className="w-full border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
                                         placeholder="Telefon"
                                         value={newClient.phone}
                                         onChange={(e) =>
@@ -333,14 +332,14 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
                                     <div className="flex justify-end gap-2">
                                         <button
-                                            className="px-3 py-1 rounded-lg text-sm bg-gray-200 hover:bg-gray-300"
+                                            className="px-3 py-1 rounded-lg text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
                                             onClick={() => setShowNewClientForm(false)}
                                         >
                                             Anuluj
                                         </button>
 
                                         <button
-                                            className="px-3 py-1 rounded-lg text-sm text-white bg-blue-500 hover:bg-blue-600"
+                                            className="px-3 py-1 rounded-lg text-sm text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50"
                                             onClick={handleCreateClient}
                                             disabled={creatingClient}
                                         >
@@ -352,10 +351,10 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         </div>
 
                         {/* EMPLOYEE */}
-                        <div className="border-b pb-4">
-                            <label className="text-sm text-gray-500">Pracownik *</label>
+                        <div className="border-b pb-4 dark:border-gray-700">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Pracownik *</label>
                             <select
-                                className="mt-2 w-full border rounded-lg p-2"
+                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
                                 value={form.employee_id}
                                 onChange={(e) =>
                                     setForm({ ...form, employee_id: Number(e.target.value) })
@@ -371,10 +370,10 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         </div>
 
                         {/* SERVICE */}
-                        <div className="border-b pb-4">
-                            <label className="text-sm text-gray-500">Usługa *</label>
+                        <div className="border-b pb-4 dark:border-gray-700">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Usługa *</label>
                             <select
-                                className="mt-2 w-full border rounded-lg p-2"
+                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
                                 value={form.service_id}
                                 onChange={(e) =>
                                     setForm({ ...form, service_id: Number(e.target.value) })
@@ -390,8 +389,8 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         </div>
 
                         {/* ADDONS */}
-                        <div className="border-b pb-4">
-                            <label className="text-sm text-gray-500">Dodatki</label>
+                        <div className="border-b pb-4 dark:border-gray-700">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Dodatki</label>
                             <div className="mt-2 space-y-1">
                                 {addons
                                     .filter((a) => !a.service_id || a.service_id === form.service_id)
@@ -416,26 +415,24 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         </div>
 
                         {/* DATE */}
-                        <div className="border-b pb-4">
-                            <label className="text-sm text-gray-500">Data *</label>
+                        <div className="border-b pb-4 dark:border-gray-700">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Data *</label>
                             <input
                                 type="date"
-                                className="mt-2 w-full border rounded-lg p-2"
+                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
                                 value={form.date}
                                 onChange={(e) => setForm({ ...form, date: e.target.value })}
                             />
                         </div>
 
                         {/* TIME */}
-                        <div className="border-b pb-4">
-                            <label className="text-sm text-gray-500">Godzina *</label>
+                        <div className="border-b pb-4 dark:border-gray-700">
+                            <label className="text-sm text-gray-500 dark:text-gray-400">Godzina *</label>
                             <select
-                                className="mt-2 w-full border rounded-lg p-2"
+                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
                                 value={form.start_time}
                                 onChange={(e) => {
-                                    const slot = availableTimes.find(
-                                        (s) => s.start_time === e.target.value
-                                    );
+                                    const slot = availableTimes.find((s) => s.start_time === e.target.value);
                                     if (!slot) return;
                                     setForm({
                                         ...form,
@@ -455,11 +452,11 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     </div>
 
                     {/* FOOTER */}
-                    <div className="sticky bottom-0 bg-gray-50 border-t flex justify-end gap-3 px-6 py-4">
+                    <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 flex justify-end gap-3 px-6 py-4">
                         <button
                             onClick={onClose}
                             disabled={saving}
-                            className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300"
+                            className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50"
                         >
                             Anuluj
                         </button>
@@ -467,8 +464,13 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         <button
                             onClick={handleSave}
                             disabled={saving}
-                            className={`px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2 ${saving ? "bg-gray-400 cursor-not-allowed" : "bg-orange-500 hover:bg-orange-600"
-                                }`}
+                            className={`
+                px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
+                ${saving
+                                    ? "bg-gray-400 cursor-not-allowed"
+                                    : "bg-orange-500 hover:bg-orange-600"
+                                }
+              `}
                         >
                             {saving ? "Zapisywanie..." : (
                                 <>

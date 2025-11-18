@@ -5,8 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../components/AuthProvider";
 
 export default function VacationModal({ open, onClose, onAdded }) {
-    const { firebaseUser } = useAuth(); // <-- 🔥 KLUCZOWE!
-
+    const { firebaseUser } = useAuth();
     const [employees, setEmployees] = useState([]);
     const [isProvider, setIsProvider] = useState(false);
 
@@ -28,24 +27,19 @@ export default function VacationModal({ open, onClose, onAdded }) {
 
         const load = async () => {
             try {
-                const token = await firebaseUser.getIdToken(); // 🔥 REQUIRED
+                const token = await firebaseUser.getIdToken();
 
-                const res = await axios.get(
-                    `${backendBase}/api/vacations/init`,
-                    {
-                        headers: { Authorization: `Bearer ${token}` }
-                    }
-                );
+                const res = await axios.get(`${backendBase}/api/vacations/init`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
 
                 const list = res.data.employees || [];
                 setEmployees(list);
                 setIsProvider(res.data.is_provider);
 
-                // auto select if only 1
                 if (!res.data.is_provider && list.length === 1) {
-                    setVacation(v => ({ ...v, employee_id: list[0].id }));
+                    setVacation((v) => ({ ...v, employee_id: list[0].id }));
                 }
-
             } catch (err) {
                 console.error("Vacation init error:", err);
             }
@@ -53,7 +47,6 @@ export default function VacationModal({ open, onClose, onAdded }) {
 
         load();
     }, [open, firebaseUser, backendBase]);
-
 
     const handleSave = async () => {
         if (!vacation.employee_id || !vacation.start_date || !vacation.end_date) {
@@ -64,29 +57,22 @@ export default function VacationModal({ open, onClose, onAdded }) {
         setSaving(true);
 
         try {
-            const token = await firebaseUser.getIdToken(); // 🔥 again
+            const token = await firebaseUser.getIdToken();
 
-            await axios.post(
-                `${backendBase}/api/vacations`,
-                vacation,
-                {
-                    headers: { Authorization: `Bearer ${token}` },
-                }
-            );
+            await axios.post(`${backendBase}/api/vacations`, vacation, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
 
-            if (onAdded) onAdded(); // bez await
-
+            if (onAdded) onAdded();
 
             setSavedPopup(true);
             setTimeout(() => {
                 setSavedPopup(false);
                 onClose();
             }, 800);
-
         } catch (err) {
             console.error("❌ Error adding vacation:", err);
             alert(err.response?.data?.error || "Błąd zapisu urlopu");
-
         } finally {
             setSaving(false);
         }
@@ -110,9 +96,9 @@ export default function VacationModal({ open, onClose, onAdded }) {
                         exit={{ y: 50, opacity: 0 }}
                         transition={{ duration: 0.3 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="w-full h-full max-w-md bg-white rounded-2xl overflow-y-auto shadow-2xl flex flex-col"
+                        className="w-full h-full max-w-md bg-white dark:bg-gray-900 dark:text-gray-100 rounded-none md:rounded-2xl overflow-y-auto shadow-2xl flex flex-col"
                     >
-                        {/* SUCCESS toast */}
+                        {/* Toast */}
                         <AnimatePresence>
                             {savedPopup && (
                                 <motion.div
@@ -126,19 +112,24 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             )}
                         </AnimatePresence>
 
-                        {/* HEADER */}
-                        <div className="sticky top-0 bg-gradient-to-r from-blue-500 to-blue-400 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
+                        {/* HEADER — identical style to AppointmentModal */}
+                        <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-400 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
                             <h2 className="text-lg font-semibold">Dodaj urlop</h2>
-                            <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/20">
+
+                            <button
+                                onClick={onClose}
+                                className="p-2 rounded-lg hover:bg-white/20 transition"
+                            >
                                 <X size={18} />
                             </button>
                         </div>
 
-                        <div className="flex-1 p-6 space-y-6 text-gray-800">
+                        {/* CONTENT — same spacing & dividers */}
+                        <div className="flex-1 p-6 space-y-6 text-gray-800 dark:text-gray-100">
 
                             {/* EMPLOYEE */}
-                            <div>
-                                <label className="text-sm text-gray-500 flex items-center gap-2">
+                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                                <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                                     <User size={14} /> Pracownik
                                 </label>
 
@@ -148,11 +139,15 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({
                                             ...v,
-                                            employee_id: Number(e.target.value)
+                                            employee_id: Number(e.target.value),
                                         }))
                                     }
-                                    className={`mt-1 w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-400
-                                        ${!isProvider ? "bg-gray-100 opacity-70 cursor-not-allowed" : ""}`}
+                                    className={`
+                    mt-1 w-full border rounded-lg p-2
+                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                    dark:bg-gray-800 dark:border-gray-700
+                    ${!isProvider ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-700" : ""}
+                  `}
                                 >
                                     <option value="">Wybierz...</option>
                                     {employees.map((e) => (
@@ -164,8 +159,8 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             </div>
 
                             {/* START DATE */}
-                            <div>
-                                <label className="text-sm text-gray-500 flex items-center gap-2">
+                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                                <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                                     <Calendar size={14} /> Początek urlopu
                                 </label>
 
@@ -175,13 +170,17 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, start_date: e.target.value }))
                                     }
-                                    className="mt-1 w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-400"
+                                    className="
+                    mt-1 w-full border rounded-lg p-2
+                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                    dark:bg-gray-800 dark:border-gray-700
+                  "
                                 />
                             </div>
 
                             {/* END DATE */}
-                            <div>
-                                <label className="text-sm text-gray-500 flex items-center gap-2">
+                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                                <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                                     <Calendar size={14} /> Koniec urlopu
                                 </label>
 
@@ -191,13 +190,17 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, end_date: e.target.value }))
                                     }
-                                    className="mt-1 w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-400"
+                                    className="
+                    mt-1 w-full border rounded-lg p-2
+                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                    dark:bg-gray-800 dark:border-gray-700
+                  "
                                 />
                             </div>
 
                             {/* REASON */}
-                            <div>
-                                <label className="text-sm text-gray-500 flex items-center gap-2">
+                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                                <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                                     <FileText size={14} /> Powód (opcjonalnie)
                                 </label>
 
@@ -206,18 +209,27 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, reason: e.target.value }))
                                     }
-                                    className="mt-1 w-full border rounded-lg p-2 h-24 resize-none focus:ring-2 focus:ring-blue-400"
                                     placeholder="np. urlop wypoczynkowy"
+                                    className="
+                    mt-1 w-full border rounded-lg p-2 h-24 resize-none
+                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                    dark:bg-gray-800 dark:border-gray-700
+                  "
                                 />
                             </div>
                         </div>
 
-                        {/* FOOTER */}
-                        <div className="sticky bottom-0 bg-gray-50 border-t flex justify-end gap-3 px-6 py-4">
+                        {/* FOOTER — same structure */}
+                        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 flex justify-end gap-3 px-6 py-4">
                             <button
                                 onClick={onClose}
                                 disabled={saving}
-                                className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 disabled:opacity-50"
+                                className="
+                  px-4 py-2 rounded-lg
+                  bg-gray-200 hover:bg-gray-300
+                  dark:bg-gray-700 dark:hover:bg-gray-600
+                  disabled:opacity-50
+                "
                             >
                                 Anuluj
                             </button>
@@ -225,10 +237,12 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             <button
                                 onClick={handleSave}
                                 disabled={saving}
-                                className={`px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2 ${saving
+                                className={`
+                  px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
+                  ${saving
                                         ? "bg-gray-400 cursor-not-allowed"
-                                        : "bg-blue-500 hover:bg-blue-600"
-                                    }`}
+                                        : "bg-orange-500 hover:bg-orange-600"}
+                `}
                             >
                                 {saving ? "Zapisywanie..." : (<><Save size={16} /> Zapisz</>)}
                             </button>

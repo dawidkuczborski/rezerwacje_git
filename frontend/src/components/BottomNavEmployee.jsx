@@ -18,14 +18,18 @@ export default function BottomNavEmployee() {
     const toggleTheme = () => {
         const html = document.documentElement;
         const isDark = html.classList.contains("dark");
-        if (isDark) {
-            html.classList.remove("dark");
-            localStorage.setItem("theme", "light");
-        } else {
-            html.classList.add("dark");
-            localStorage.setItem("theme", "dark");
-        }
+        const newTheme = isDark ? "light" : "dark";
+
+        // aktualny toggle
+        html.classList.toggle("dark", newTheme === "dark");
+
+        // zapisz
+        localStorage.setItem("theme", newTheme);
+
+        // 🔥 powiadom inne komponenty
+        window.dispatchEvent(new Event("themeChanged"));
     };
+
 
     const handleLogout = () => {
         if (window.confirm("Czy na pewno chcesz się wylogować?")) {
