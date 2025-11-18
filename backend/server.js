@@ -88,8 +88,9 @@ try {
 // -------------------- Postgres pool --------------------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || process.env.PG_CONNECTION || "",
-  ssl: { rejectUnauthorized: false }, // zawsze SSL, Render tego wymaga
+  ssl: false,
 });
+
 
 pool.on("error", (err) => {
   console.error("Unexpected PG client error", err);
