@@ -7,9 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+
+      // 🔧 ważna poprawka — wcześniej było enabled: true
       devOptions: {
-        enabled: true, // ✅ działa w trybie npm run dev
+        enabled: process.env.NODE_ENV !== "production",
       },
+
       manifest: {
         name: "BarberBook",
         short_name: "BarberBook",
@@ -34,8 +37,11 @@ export default defineConfig({
     }),
   ],
 
-  // 👇 DODAJ TO, ŻEBY NAPRAWIĆ BŁĄD "process is not defined"
+  // 👇 to zostaje — naprawia `process is not defined` na froncie
   define: {
-    'process.env': {}, // <- zapobiega ReferenceError w przeglądarce
+    "process.env": {},
   },
+
+  // ⚠️ Jeśli kiedyś hostujesz w subfolderze — odkomentuj ↓
+  // base: "/",
 });
