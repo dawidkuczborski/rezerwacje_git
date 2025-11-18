@@ -969,7 +969,7 @@ app.get(
             // 4) Ilość wszystkich salonów (do paginacji)
             pool.query(`SELECT COUNT(*) FROM salons WHERE is_active = true;`)
         ]);
-
+        ///zmiany///
         // 🔧 Mapa ocen { salonId: { average, total } }
         const ratingsMap = {};
         for (const s of salonsRes.rows) {
