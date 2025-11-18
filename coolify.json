@@ -1,0 +1,10 @@
+{
+  "build": {
+    "type": "docker"
+  },
+  "run": {
+    "port": 5000,
+    "public": true,
+    "healthcheck_path": "/"
+  }
+}
