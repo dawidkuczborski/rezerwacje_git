@@ -4636,7 +4636,7 @@ io.on("connection", (socket) => {
 export { io };
 
 // Start serwera HTTP + WebSocket
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server działa z WebSocket na http://0.0.0.0:${PORT}`);
 });
