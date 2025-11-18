@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🔧 Globalne style – opcjonalne, ale dobre do testu */
+body {
+  @apply bg-[#1d1d1f] text-white font-sans;
+}
+
+/* 👇 Ten wpis poniżej NIE jest obowiązkowy,
+   ale możesz go zostawić tylko do testu,
+   żeby zobaczyć, czy Tailwind działa. */
+body {
+  background: #1d1d1f;
+}
+/* Ukrywa paski przewijania, ale pozwala przewijać */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome, Safari */
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE, Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+html, body {
+  scrollbar-width: none;         /* Firefox */
+  -ms-overflow-style: none;      /* Internet Explorer i Edge */
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;                 /* Chrome, Safari, Opera */
+}
+
+/* 🔹 Styl dla wszystkich przycisków */
+
+
+html, body {
+  background-color: #f9fafb; /* jasny Tailwind gray-50 */
+  transition: background-color 0s;
+}
+
+html.dark, body.dark {
+  background-color: #111827; /* Tailwind gray-900 */
+}
+/* --- Animacja kliknięcia przycisków (onPointerDown) --- */
+button.pressed {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.15) inset;
+  transition: transform 0.1s ease, filter 0.1s ease, box-shadow 0.1s ease;
+}
+/* 🔥 WYŁĄCZANIE scroll barów TYLKO w kalendarzu */
+.employee-calendar-page * {
+  scrollbar-width: none !important;      /* Firefox */
+  -ms-overflow-style: none !important;    /* Edge/IE */
+}
+
+/* Chrome / Safari */
+.employee-calendar-page *::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* 🔥 WYŁĄCZANIE "szarych pasków przewijania" Safari */
+.employee-calendar-page * {
+  overscroll-behavior: contain !important;
+}
+
+/* 🔥 WYŁĄCZANIE zaznaczania tekstu tylko na tej stronie */
+.employee-calendar-page {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -ms-user-select: none !important;
+}

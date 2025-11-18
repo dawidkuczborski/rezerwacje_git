@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===========================================================
+   🌙 GLOBALNE STYLOWANIE / THEME
+   =========================================================== */
+
+@layer base {
+  html, body {
+    @apply text-gray-900 dark:text-white;
+    background-color: var(--app-bg);
+    color: var(--app-text);
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: theme("fontFamily.sans");
+    min-height: 100%;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ===========================================================
+   🎨 ZMIENNE KOLORÓW
+   =========================================================== */
+:root {
+  --app-bg: #f9fafb; /* Jasny motyw */
+  --app-text: #111827;
+  --safe-top-bg: #f9fafb;
+}
+
+.dark {
+  --app-bg: #0f0f10; /* Ciemny motyw */
+  --app-text: #ffffff;
+  --safe-top-bg: #0f0f10;
+}
+
+/* ===========================================================
+   📱 SAFE AREA (Dynamic Island / notch / Home bar)
+   =========================================================== */
+
+/* 🔝 Pasek tła pod godziną */
+.safe-top {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top);
+  background-color: var(--safe-top-bg);
+  z-index: 9999;
+}
+
+/* 🔻 Margines od góry pod notchem */
+.main-container {
+  padding-top: calc(env(safe-area-inset-top) + 10px);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 10px);
+  background-color: var(--app-bg);
+  min-height: 100vh;
+}
+
+/* ===========================================================
+   💡 (opcjonalnie) tło globalne
+   =========================================================== */
+html {
+  background-color: var(--app-bg);
+}
+@media screen and (orientation: landscape) {
+  body::before {
+    content: "📱 Obróć telefon pionowo";
+    position: fixed;
+    inset: 0;
+    background: #000;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    z-index: 99999;
+  }
+
+  body > * {
+    display: none !important;
+  }
+}

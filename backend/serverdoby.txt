@@ -1,0 +1,2080 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import admin from "firebase-admin";
+import pkg from "pg";
+import fs from "fs";
+import path from "path";
+import multer from "multer";        // ✅ DODAJ TO!
+import { fileURLToPath } from "url";
+
+dotenv.config();
+const { Pool } = pkg;
+
+// 🔹 Firebase Admin SDK
+const serviceAccount = JSON.parse(
+  fs.readFileSync("./serviceAccountKey.json", "utf8")
+);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+// 🔹 Połączenie z bazą PostgreSQL (Render)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+// 🔹 Express app
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// 🔹 Ścieżki absolutne (żeby działało niezależnie od miejsca uruchomienia)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 🔹 Folder z obrazkami udostępniony publicznie
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+
+
+
+
+// ------------------- SALONY -------------------
+const salonStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const basePath = path.join("uploads", "salons");
+    fs.mkdirSync(basePath, { recursive: true });
+    cb(null, basePath);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const safeName = file.originalname.replace(/\s+/g, "_");
+    cb(null, Date.now() + "_" + safeName);
+  },
+});
+export const uploadSalonImage = multer({ storage: salonStorage });
+
+// ------------------- USŁUGI -------------------
+const serviceStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const salonId = req.body.salon_id || "unknown";
+    const basePath = path.join("uploads", `salon_${salonId}`, "services");
+    fs.mkdirSync(basePath, { recursive: true });
+    cb(null, basePath);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const safeName = file.originalname.replace(/\s+/g, "_");
+    cb(null, Date.now() + "_" + safeName);
+  },
+});
+export const uploadServiceImage = multer({ storage: serviceStorage });
+
+// 🔹 Folder główny z plikami udostępniony publicznie
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+
+// ------------------- PRACOWNICY -------------------
+const employeeStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const salonId = req.body.salon_id || "unknown";
+    const basePath = path.join("uploads", `salon_${salonId}`, "employees");
+    fs.mkdirSync(basePath, { recursive: true });
+    cb(null, basePath);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const safeName = file.originalname.replace(/\s+/g, "_");
+    cb(null, Date.now() + "_" + safeName);
+  },
+});
+export const uploadEmployeeImage = multer({ storage: employeeStorage });
+
+
+
+
+// 🔹 Tworzenie tabel (jeśli nie istnieją)
+const initTables = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      uid VARCHAR(255) UNIQUE NOT NULL,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      name VARCHAR(255),
+      role VARCHAR(50) DEFAULT 'client',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS salons (
+    id SERIAL PRIMARY KEY,
+    owner_uid VARCHAR(255) REFERENCES users(uid) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    city VARCHAR(100),
+    street VARCHAR(100),
+    street_number VARCHAR(20),
+    postal_code VARCHAR(20),
+    phone VARCHAR(50),
+    description TEXT,
+    image_url VARCHAR(255),   -- 🔹 ścieżka do zdjęcia
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+  // 🔹 Tabela pracowników
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS employees (
+    id SERIAL PRIMARY KEY,
+    salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+    uid VARCHAR(255) UNIQUE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(50),
+    description TEXT,
+    image_url VARCHAR(255), -- 🔹 dodane pole na zdjęcie
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+
+  // 🔹 Tabela usług
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS services (
+    id SERIAL PRIMARY KEY,
+    salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    duration_minutes INTEGER NOT NULL,
+    price NUMERIC(10,2) NOT NULL,
+    description TEXT,
+    image_url VARCHAR(255), -- 🔹 nowe pole na zdjęcie
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+
+  // 🔹 Powiązania usług z pracownikami
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS employee_services (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+      service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+      UNIQUE (employee_id, service_id)
+    );
+  `);
+
+  // 🔹 Harmonogram pracowników (indywidualne godziny pracy)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS employee_schedule (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+      day_of_week INTEGER NOT NULL,         -- 0 = niedziela, 6 = sobota
+      open_time TIME NOT NULL,
+      close_time TIME NOT NULL,
+      is_day_off BOOLEAN DEFAULT false,
+      UNIQUE (employee_id, day_of_week)
+    );
+  `);
+
+  // 🔹 Święta i dni wolne salonu
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS salon_holidays (
+      id SERIAL PRIMARY KEY,
+      salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      reason VARCHAR(255),
+      UNIQUE (salon_id, date)
+    );
+  `);
+
+  // 🔹 rezerwacja
+  await pool.query(`
+	  CREATE TABLE IF NOT EXISTS appointments (
+	  id SERIAL PRIMARY KEY,
+	  salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+	  employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+	  client_uid VARCHAR(255) REFERENCES users(uid) ON DELETE SET NULL,
+	  service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+	  date DATE NOT NULL,
+	  start_time TIME NOT NULL,
+	  end_time TIME NOT NULL,
+	  status VARCHAR(50) DEFAULT 'booked', -- booked / cancelled / completed
+	  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+  `);
+  
+// 🔹 Usługi dodatkowe
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS service_addons (
+    id SERIAL PRIMARY KEY,
+    salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    duration_minutes INTEGER NOT NULL,
+    price NUMERIC(10,2) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+// 🔹 Powiązania usług głównych z dodatkami (N↔N)
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS service_addon_links (
+    id SERIAL PRIMARY KEY,
+    service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+    addon_id INTEGER REFERENCES service_addons(id) ON DELETE CASCADE,
+    UNIQUE (service_id, addon_id)
+  );
+`);
+  // 🔹 Powiązanie rezerwacji z dodatkami (N:N)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS appointment_addons (
+      id SERIAL PRIMARY KEY,
+      appointment_id INTEGER REFERENCES appointments(id) ON DELETE CASCADE,
+      addon_id INTEGER REFERENCES service_addons(id) ON DELETE CASCADE,
+      UNIQUE (appointment_id, addon_id)
+    );
+  `);
+
+    // 🔹 Urlopy / nieobecności pracowników
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS employee_vacations (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      reason VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+  );
+`);
+
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS salon_categories (
+    id SERIAL PRIMARY KEY,
+    salon_id INTEGER REFERENCES salons(id) ON DELETE CASCADE,
+    category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    UNIQUE (salon_id, category_id)
+  );
+`);
+
+await pool.query(`
+  INSERT INTO categories (name)
+  VALUES 
+    ('Fryzjer'),
+    ('Barber'),
+    ('Kosmetyczka'),
+    ('Spa'),
+    ('Manicure / Pedicure')
+  ON CONFLICT (name) DO NOTHING;
+`);
+
+
+  console.log("✅ Tables 'employee_schedule', 'salon_holidays', 'employee_vacations' ready");
+};
+
+// 🟢 Uruchom inicjalizację tabel
+initTables()
+  .then(() => console.log("✅ Wszystkie tabele zostały utworzone lub już istnieją"))
+  .catch((err) => console.error("❌ Błąd przy tworzeniu tabel:", err));
+
+
+
+// 🔹 Middleware – weryfikacja tokenu Firebase i pobranie użytkownika z bazy
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      req.user = null;
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    const userResult = await pool.query(
+      "SELECT * FROM users WHERE uid = $1 LIMIT 1",
+      [decoded.uid]
+    );
+
+    if (userResult.rows.length === 0) {
+      req.user = { uid: decoded.uid, email: decoded.email, role: "guest" };
+    } else {
+      req.user = userResult.rows[0];
+    }
+    next();
+  } catch (error) {
+    console.error("verifyToken error:", error);
+    req.user = null;
+    next();
+  }
+};
+
+// --- Middleware: tylko właściciele mogą zarządzać salonami ---
+function requireProviderRole(req, res, next) {
+  if (!req.user || req.user.role !== "provider") {
+    return res
+      .status(403)
+      .json({ error: "Tylko właściciele salonów mają dostęp" });
+  }
+  next();
+}
+
+// --- Rejestracja użytkownika ---
+app.post("/api/auth/register", verifyToken, async (req, res) => {
+  const { email, name, role, phone } = req.body;
+  const uid = req.user?.uid;
+
+  if (!uid) return res.status(401).json({ error: "Brak UID użytkownika" });
+
+  // 🔹 Walidacja numeru telefonu
+  const phoneRegex = /^[0-9]{9}$/;
+  if (!phoneRegex.test(phone)) {
+    return res.status(400).json({ error: "Numer telefonu musi zawierać dokładnie 9 cyfr" });
+  }
+
+  try {
+    const existing = await pool.query("SELECT * FROM users WHERE uid = $1", [uid]);
+    if (existing.rows.length > 0)
+      return res.status(200).json({ message: "Użytkownik już istnieje", user: existing.rows[0] });
+
+    const result = await pool.query(
+      `INSERT INTO users (uid, email, name, phone, role)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [uid, email, name, phone, role || "client"]
+    );
+
+    res.status(201).json({ message: "✅ Użytkownik zarejestrowany", user: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Błąd przy rejestracji:", err);
+    res.status(500).json({ error: "Błąd serwera przy rejestracji" });
+  }
+});
+
+
+
+app.get("/api/auth/me", verifyToken, async (req, res) => {
+  try {
+    if (!req.user?.uid) return res.status(401).json({ error: "Brak użytkownika" });
+
+    // 🔹 Jeśli użytkownik jest już w bazie — zwróć go
+    const result = await pool.query("SELECT * FROM users WHERE uid = $1", [req.user.uid]);
+    if (result.rows.length > 0) {
+      return res.json(result.rows[0]);
+    }
+
+    // 🔹 Jeśli nie ma w bazie — utwórz nowego użytkownika na podstawie Firebase
+    const fbUser = await admin.auth().getUser(req.user.uid);
+
+    const newUser = {
+      uid: fbUser.uid,
+      email: fbUser.email,
+      name: fbUser.displayName || "Użytkownik",
+      role: "client",
+    };
+
+    // Opcjonalnie — możesz dodać do bazy:
+    await pool.query(
+      "INSERT INTO users (uid, email, name, role) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
+      [newUser.uid, newUser.email, newUser.name, newUser.role]
+    );
+
+    return res.json(newUser);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu użytkownika:", err);
+    res.status(500).json({ error: "Błąd serwera przy pobieraniu użytkownika" });
+  }
+});
+
+
+
+// --- Tworzenie salonu z opcjonalnym zdjęciem ---
+app.post("/api/salons", verifyToken, requireProviderRole, uploadSalonImage.single("image"), async (req, res) => {
+
+  const { name, city, street, street_number, postal_code, phone, description } = req.body;
+  const image_url = req.file ? req.file.filename : null;
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO salons
+        (owner_uid, name, city, street, street_number, postal_code, phone, description, image_url, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+       RETURNING *`,
+      [req.user.uid, name, city, street, street_number, postal_code, phone, description, image_url]
+    );
+
+    res.json({ message: "✅ Salon utworzony", salon: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Błąd przy tworzeniu salonu:", err);
+    res.status(500).json({ error: "Błąd przy tworzeniu salonu" });
+  }
+});
+
+
+// --- Aktualizacja salonu ---
+app.put("/api/salons/:id", verifyToken, requireProviderRole, uploadSalonImage.single("image"), async (req, res) => {
+
+  const { id } = req.params;
+  const { name, city, street, street_number, postal_code, phone, description } = req.body;
+  const newImage = req.file ? req.file.filename : null;
+
+  try {
+    // 🔹 Pobierz istniejące dane salonu, żeby zachować stare zdjęcie jeśli nie ma nowego
+    const existing = await pool.query(
+      "SELECT image_url FROM salons WHERE id=$1 AND owner_uid=$2",
+      [id, req.user.uid]
+    );
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: "Salon nie znaleziony lub brak uprawnień" });
+    }
+
+    const currentImage = existing.rows[0].image_url;
+    const finalImage = newImage || currentImage; // ← zostaw stare zdjęcie jeśli brak nowego
+
+    // 🔹 Aktualizuj dane
+    const updateQuery = `
+      UPDATE salons SET
+        name=$1, city=$2, street=$3, street_number=$4,
+        postal_code=$5, phone=$6, description=$7, image_url=$8
+      WHERE id=$9 AND owner_uid=$10
+      RETURNING *;
+    `;
+
+    const result = await pool.query(updateQuery, [
+      name,
+      city,
+      street,
+      street_number,
+      postal_code,
+      phone,
+      description,
+      finalImage,
+      id,
+      req.user.uid,
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Salon nie został znaleziony" });
+    }
+
+    res.json({ message: "Salon zaktualizowany pomyślnie", salon: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Błąd przy edycji salonu:", err.message);
+    res.status(500).json({ error: "Błąd przy edycji salonu" });
+  }
+});
+
+
+
+
+app.delete("/api/salons/:id", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      "DELETE FROM salons WHERE id=$1 AND owner_uid=$2 RETURNING id",
+      [id, req.user.uid]
+    );
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Nie znaleziono salonu" });
+
+    res.json({ message: "🗑️ Salon usunięty" });
+  } catch (err) {
+    console.error("❌ Błąd przy usuwaniu salonu:", err);
+    res.status(500).json({ error: "Błąd przy usuwaniu salonu" });
+  }
+});
+
+
+
+
+// --- Pobieranie salonu zalogowanego właściciela ---
+app.get("/api/salons/mine", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM salons WHERE owner_uid = $1 LIMIT 1", [
+      req.user.uid,
+    ]);
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Błąd przy pobieraniu salonu" });
+  }
+});
+
+
+// --- Zaproszenie pracownika z opcjonalnym zdjęciem ---
+app.post(
+  "/api/employees/invite",
+  verifyToken,
+  requireProviderRole,
+  uploadEmployeeImage.single("image"), // 🆕 obsługa pliku
+  async (req, res) => {
+    const { name, email, phone, description, password, salon_id } = req.body;
+    const image_url = req.file
+      ? `uploads/salon_${salon_id}/employees/${req.file.filename}`
+      : null;
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: "Hasło musi mieć co najmniej 6 znaków" });
+    }
+    if (!salon_id) {
+      return res.status(400).json({ error: "Brak salon_id — wybierz salon" });
+    }
+
+    try {
+      // 🔹 Sprawdź, czy salon należy do zalogowanego właściciela
+      const salonCheck = await pool.query(
+        `SELECT id FROM salons WHERE id = $1 AND owner_uid = $2`,
+        [salon_id, req.user.uid]
+      );
+      if (salonCheck.rows.length === 0) {
+        return res.status(403).json({ error: "Nie masz uprawnień do tego salonu" });
+      }
+
+      // 🔹 Utwórz konto Firebase
+      let userRecord;
+      try {
+        userRecord = await admin.auth().getUserByEmail(email);
+        return res.status(400).json({ error: "Użytkownik o tym e-mailu już istnieje" });
+      } catch (err) {
+        if (err.code === "auth/user-not-found") {
+          userRecord = await admin.auth().createUser({
+            email,
+            password,
+            displayName: name,
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      // 🔹 Zapisz pracownika do bazy z obrazkiem
+      const result = await pool.query(
+        `INSERT INTO employees (salon_id, uid, name, email, phone, description, image_url, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+         RETURNING *`,
+        [salon_id, userRecord.uid, name, email, phone, description, image_url]
+      );
+
+      res.json({
+        message: `✅ Pracownik ${name} dodany do salonu #${salon_id}`,
+        employee: result.rows[0],
+      });
+    } catch (err) {
+      console.error("❌ Błąd przy tworzeniu pracownika:", err);
+      res.status(500).json({ error: "Błąd przy tworzeniu pracownika" });
+    }
+  }
+);
+
+
+// --- Edycja pracownika (z opcjonalnym nowym zdjęciem)
+app.put(
+  "/api/employees/:id",
+  verifyToken,
+  requireProviderRole,
+  uploadEmployeeImage.single("image"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { name, phone, description, salon_id } = req.body;
+    const newImage = req.file
+      ? `uploads/salon_${salon_id}/employees/${req.file.filename}`
+      : null;
+
+    try {
+      const empCheck = await pool.query(
+        `SELECT e.id, e.image_url
+         FROM employees e
+         JOIN salons s ON e.salon_id = s.id
+         WHERE e.id = $1 AND s.owner_uid = $2`,
+        [id, req.user.uid]
+      );
+
+      if (empCheck.rows.length === 0) {
+        return res.status(403).json({ error: "Brak uprawnień do edycji pracownika" });
+      }
+
+      const currentImage = empCheck.rows[0].image_url;
+      const finalImage = newImage || currentImage;
+
+      const result = await pool.query(
+        `UPDATE employees
+         SET name=$1, phone=$2, description=$3, image_url=$4
+         WHERE id=$5
+         RETURNING *`,
+        [name, phone, description, finalImage, id]
+      );
+
+      res.json({ message: "✅ Pracownik zaktualizowany", employee: result.rows[0] });
+    } catch (err) {
+      console.error("❌ Błąd przy edycji pracownika:", err);
+      res.status(500).json({ error: "Błąd przy edycji pracownika" });
+    }
+  }
+);
+
+
+
+
+
+
+
+
+
+
+
+// --- Tworzenie nowej usługi (tylko właściciel) ---
+app.post(
+  "/api/services",
+  verifyToken,
+  requireProviderRole,
+  uploadServiceImage.single("image"),
+  async (req, res) => {
+    try {
+      // 🔹 multer wypełni req.body, więc możemy odczytać pola
+      const { name, duration_minutes, price, description, salon_id } = req.body;
+      const image_url = req.file
+  ? `uploads/salon_${salon_id}/services/${req.file.filename}`
+  : null;
+
+
+      if (!salon_id || !name || !price) {
+        return res.status(400).json({ error: "Brak wymaganych danych" });
+      }
+
+      // 🔹 Sprawdź, czy salon należy do zalogowanego właściciela
+      const salonCheck = await pool.query(
+        "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+        [salon_id, req.user.uid]
+      );
+
+      if (salonCheck.rows.length === 0) {
+        return res
+          .status(403)
+          .json({ error: "Nie masz uprawnień do tego salonu" });
+      }
+
+      // 🔹 Zapisz usługę do bazy
+      const result = await pool.query(
+        `INSERT INTO services (salon_id, name, duration_minutes, price, description, image_url)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING *`,
+        [salon_id, name, duration_minutes, price, description, image_url]
+      );
+
+      res.json({ message: "💇‍♂️ Usługa dodana", service: result.rows[0] });
+    } catch (err) {
+      console.error("❌ Błąd przy dodawaniu usługi:", err);
+      res.status(500).json({ error: "Błąd przy dodawaniu usługi" });
+    }
+  }
+);
+
+
+// --- Edycja usługi z możliwością zmiany zdjęcia ---
+app.put(
+  "/api/services/:id",
+  verifyToken,
+  requireProviderRole,
+  uploadServiceImage.single("image"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { name, duration_minutes, price, description, salon_id } = req.body;
+    const newImage = req.file
+      ? path.join(`salon_${salon_id}`, "services", req.file.filename)
+      : null;
+
+    try {
+      // 🔹 Sprawdź, czy usługa należy do salonu właściciela
+      const serviceCheck = await pool.query(
+        `SELECT s.id, s.image_url
+         FROM services s
+         JOIN salons sa ON s.salon_id = sa.id
+         WHERE s.id = $1 AND sa.owner_uid = $2`,
+        [id, req.user.uid]
+      );
+
+      if (serviceCheck.rows.length === 0) {
+        return res
+          .status(403)
+          .json({ error: "Brak uprawnień do edycji tej usługi" });
+      }
+
+      const currentImage = serviceCheck.rows[0].image_url;
+      const finalImage = newImage || currentImage;
+
+      // 🔹 Aktualizuj dane usługi
+      const result = await pool.query(
+        `UPDATE services
+         SET name = $1,
+             duration_minutes = $2,
+             price = $3,
+             description = $4,
+             image_url = $5
+         WHERE id = $6
+         RETURNING *`,
+        [name, duration_minutes, price, description, finalImage, id]
+      );
+
+      res.json({ message: "✅ Usługa zaktualizowana", service: result.rows[0] });
+    } catch (err) {
+      console.error("❌ Błąd edycji usługi:", err);
+      res.status(500).json({ error: "Błąd przy edycji usługi" });
+    }
+  }
+);
+
+
+
+
+// --- Pobieranie usług danego salonu (dla właściciela) ---
+app.get("/api/services/mine", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const { salon_id } = req.query;
+
+    if (!salon_id) {
+      return res.status(400).json({ error: "Brak salon_id w zapytaniu" });
+    }
+
+    // 🔹 Sprawdź, czy salon należy do zalogowanego właściciela
+    const salonCheck = await pool.query(
+      "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+      [salon_id, req.user.uid]
+    );
+
+    if (salonCheck.rows.length === 0) {
+      return res.status(403).json({ error: "Nie masz dostępu do tego salonu" });
+    }
+
+    // 🔹 Pobierz usługi tego salonu
+  const result = await pool.query(
+  `SELECT id, name, duration_minutes, price, description, image_url, is_active, created_at
+   FROM services
+   WHERE salon_id = $1
+   ORDER BY created_at DESC`,
+  [salon_id]
+);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu usług salonu:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu usług salonu" });
+  }
+});
+
+
+
+// --- Przypisywanie usługi do pracownika (tylko właściciel) ---
+app.post("/api/employee-services", verifyToken, requireProviderRole, async (req, res) => {
+  const { employee_id, service_id } = req.body;
+
+  try {
+    await pool.query(
+      `INSERT INTO employee_services (employee_id, service_id)
+       VALUES ($1, $2)
+       ON CONFLICT (employee_id, service_id) DO NOTHING`,
+      [employee_id, service_id]
+    );
+
+    res.json({ message: "✅ Usługa przypisana do pracownika" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Błąd przy przypisywaniu usługi" });
+  }
+});
+
+// --- Pobranie przypisań usług do pracowników konkretnego salonu ---
+app.get("/api/employee-services", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const { salon_id } = req.query;
+
+    if (!salon_id) {
+      return res.status(400).json({ error: "Brak salon_id w zapytaniu" });
+    }
+
+    // 🔹 Sprawdź, czy salon należy do zalogowanego właściciela
+    const salonCheck = await pool.query(
+      "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+      [salon_id, req.user.uid]
+    );
+
+    if (salonCheck.rows.length === 0) {
+      return res.status(403).json({ error: "Nie masz dostępu do tego salonu" });
+    }
+
+    // 🔹 Pobierz przypisania tylko z tego salonu
+    const result = await pool.query(
+      `SELECT e.id AS employee_id, e.name AS employee_name, e.email,
+              s.id AS service_id, s.name AS service_name
+       FROM employees e
+       LEFT JOIN employee_services es ON e.id = es.employee_id
+       LEFT JOIN services s ON es.service_id = s.id
+       WHERE e.salon_id = $1
+       ORDER BY e.id, s.id;`,
+      [salon_id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu przypisań usług:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu przypisań usług" });
+  }
+});
+
+
+
+// --- Przełączanie przypisania usługi (checkbox) ---
+app.post("/api/employee-services/toggle", verifyToken, requireProviderRole, async (req, res) => {
+  const { employee_id, service_id, assigned } = req.body;
+
+  try {
+    if (assigned) {
+      await pool.query(
+        `INSERT INTO employee_services (employee_id, service_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [employee_id, service_id]
+      );
+    } else {
+      await pool.query(
+        `DELETE FROM employee_services WHERE employee_id = $1 AND service_id = $2`,
+        [employee_id, service_id]
+      );
+    }
+
+    res.json({ message: "✅ Zaktualizowano przypisanie" });
+  } catch (err) {
+    console.error("❌ Błąd aktualizacji przypisania:", err);
+    res.status(500).json({ error: "Błąd przy aktualizacji przypisania" });
+  }
+});
+
+// --- Pobierz harmonogram danego pracownika ---
+app.get("/api/schedule/employee/:employeeId", verifyToken, requireProviderRole, async (req, res) => {
+  const { employeeId } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT * FROM employee_schedule 
+       WHERE employee_id = $1
+       ORDER BY day_of_week`,
+      [employeeId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd pobierania harmonogramu:", err);
+    res.status(500).json({ error: "Błąd serwera" });
+  }
+});
+
+// --- Zapis harmonogramu danego pracownika ---
+app.post("/api/schedule/employee/:employeeId", verifyToken, requireProviderRole, async (req, res) => {
+  const { employeeId } = req.params;
+  const { schedule } = req.body;
+
+  try {
+    await pool.query("DELETE FROM employee_schedule WHERE employee_id = $1", [employeeId]);
+    for (const d of schedule) {
+      await pool.query(
+        `INSERT INTO employee_schedule (employee_id, day_of_week, open_time, close_time, is_day_off)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [employeeId, d.day_of_week, d.open_time, d.close_time, d.is_day_off]
+      );
+    }
+
+    res.json({ message: "✅ Harmonogram zapisany dla pracownika" });
+  } catch (err) {
+    console.error("❌ Błąd zapisu harmonogramu pracownika:", err);
+    res.status(500).json({ error: "Błąd zapisu harmonogramu" });
+  }
+});
+
+
+
+
+// --- Pobierz święta salonu ---
+app.get("/api/schedule/holidays", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const salon = await pool.query("SELECT id FROM salons WHERE owner_uid = $1 LIMIT 1", [req.user.uid]);
+    if (salon.rows.length === 0) return res.status(400).json({ error: "Nie znaleziono salonu" });
+
+    const salonId = salon.rows[0].id;
+    const result = await pool.query("SELECT * FROM salon_holidays WHERE salon_id = $1 ORDER BY date", [salonId]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd pobierania dni wolnych:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu dni wolnych" });
+  }
+});
+
+// --- Dodaj lub usuń dzień wolny ---
+app.post("/api/schedule/holidays", verifyToken, requireProviderRole, async (req, res) => {
+  const { date, reason } = req.body;
+  try {
+    const salon = await pool.query("SELECT id FROM salons WHERE owner_uid = $1 LIMIT 1", [req.user.uid]);
+    const salonId = salon.rows[0].id;
+
+    await pool.query(
+      `INSERT INTO salon_holidays (salon_id, date, reason)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (salon_id, date) DO UPDATE SET reason = EXCLUDED.reason`,
+      [salonId, date, reason]
+    );
+
+    res.json({ message: "✅ Dzień wolny dodany" });
+  } catch (err) {
+    console.error("❌ Błąd przy dodawaniu dnia wolnego:", err);
+    res.status(500).json({ error: "Błąd przy dodawaniu dnia wolnego" });
+  }
+});
+
+
+// --- Pobierz urlopy pracowników ---
+app.get("/api/schedule/vacations", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+   const { salon_id } = req.body;
+
+const salonCheck = await pool.query(
+  "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+  [salon_id, req.user.uid]
+);
+
+if (salonCheck.rows.length === 0) {
+  return res.status(403).json({ error: "Nie masz uprawnień do tego salonu" });
+}
+
+
+    const result = await pool.query(`
+      SELECT e.name AS employee_name, v.*
+      FROM employee_vacations v
+      JOIN employees e ON v.employee_id = e.id
+      WHERE e.salon_id = $1
+      ORDER BY start_date;
+    `, [salonId]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu urlopów:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu urlopów" });
+  }
+});
+
+// --- Dodaj urlop pracownika ---
+app.post("/api/schedule/vacations", verifyToken, requireProviderRole, async (req, res) => {
+  const { employee_id, start_date, end_date, reason } = req.body;
+  try {
+    await pool.query(
+      `INSERT INTO employee_vacations (employee_id, start_date, end_date, reason)
+       VALUES ($1, $2, $3, $4)`,
+      [employee_id, start_date, end_date, reason]
+    );
+
+    res.json({ message: "✅ Urlop dodany" });
+  } catch (err) {
+    console.error("❌ Błąd przy dodawaniu urlopu:", err);
+    res.status(500).json({ error: "Błąd przy dodawaniu urlopu" });
+  }
+});
+
+
+
+
+// --- Pobierz wszystkie usługi przypisane do danego pracownika ---
+app.get("/api/services/by-employee/:employeeId", verifyToken, async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+
+    if (!employeeId) {
+      return res.status(400).json({ error: "Brak parametru employeeId" });
+    }
+
+    // 🔹 pobierz wszystkie ID usług przypisanych do pracownika
+    const rel = await pool.query(
+      `SELECT service_id FROM employee_services WHERE employee_id = $1`,
+      [employeeId]
+    );
+
+    if (!rel.rows.length) {
+      return res.json([]); // brak usług
+    }
+
+    const serviceIds = rel.rows.map(r => r.service_id);
+
+    // 🔹 pobierz szczegóły usług
+    const services = await pool.query(
+      `SELECT id, name, price, duration_minutes
+       FROM services
+       WHERE id = ANY($1::int[])`,
+      [serviceIds]
+    );
+
+    res.json(services.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu usług pracownika:", err);
+    res.status(500).json({ error: "Błąd serwera przy pobieraniu usług pracownika" });
+  }
+});
+
+
+
+
+
+
+
+
+// --- Pobierz dostępne terminy (sloty) dla danego dnia i usługi ---
+app.get("/api/appointments/available", verifyToken, async (req, res) => {
+  try {
+    const { employee_id: employeeIdRaw, service_id, date } = req.query;
+    let { addons, total_duration } = req.query;
+
+    console.log("🧭 /available → zapytanie:", req.query);
+
+    if (!service_id || service_id === "undefined" || !date) {
+      console.warn("⚠️ Brak service_id lub date – zwracam pustą listę slotów:", req.query);
+      return res.json([]);
+    }
+
+    const employee_id =
+      employeeIdRaw && !isNaN(Number(employeeIdRaw))
+        ? Number(employeeIdRaw)
+        : null;
+
+    /* ---------------------------------------------
+     * 🧩 Poprawna interpretacja addons z query
+     * Express przyjmuje addons[0]=1&addons[1]=2 jako { '0': '1', '1': '2' }
+     * --------------------------------------------- */
+    let addonIds = [];
+    if (addons) {
+      if (typeof addons === "object" && !Array.isArray(addons)) {
+        addonIds = Object.values(addons).map(Number);
+      } else if (Array.isArray(addons)) {
+        addonIds = addons.map(Number);
+      } else {
+        addonIds = [Number(addons)];
+      }
+      addonIds = addonIds.filter((n) => Number.isFinite(n) && n > 0);
+    }
+
+    console.log("🧩 Slots query params:", {
+      employee_id,
+      service_id,
+      date,
+      addonIds,
+      total_duration,
+    });
+
+    const targetDate = new Date(date);
+    const dayOfWeek = targetDate.getUTCDay(); // 0 = niedziela, 6 = sobota
+
+    // 🔹 Pobierz bazową długość usługi z bazy
+    const serviceRes = await pool.query(
+      `SELECT duration_minutes FROM services WHERE id=$1`,
+      [service_id]
+    );
+    let duration = Number(serviceRes.rows[0]?.duration_minutes || 0);
+
+    // 🔹 Jeżeli podano dodatki – dolicz ich czasy
+    if (addonIds.length > 0) {
+      const addonQuery = await pool.query(
+        `SELECT COALESCE(SUM(duration_minutes), 0) AS total
+         FROM service_addons WHERE id = ANY($1::int[])`,
+        [addonIds]
+      );
+      const extra = Number(addonQuery.rows[0]?.total || 0);
+      duration += extra;
+      console.log(`➕ Dodatki (${addonIds.length}) dodają ${extra} min → razem ${duration} min`);
+    }
+
+    // 🔹 Jeśli frontend przesłał total_duration — nadpisz
+    if (total_duration) {
+      const totalFromClient = Number(total_duration);
+      if (!isNaN(totalFromClient) && totalFromClient > 0) {
+        console.log("🕒 Nadpisano długość usługi przez frontend:", totalFromClient, "min");
+        duration = totalFromClient;
+      }
+    }
+
+    // 🔹 Pobierz pracowników przypisanych do usługi
+    let employees = [];
+    if (employee_id) {
+      const empRes = await pool.query("SELECT id, name FROM employees WHERE id = $1", [employee_id]);
+      if (!empRes.rows.length)
+        return res.status(404).json({ error: "Nie znaleziono pracownika" });
+      employees = empRes.rows;
+    } else {
+      const empRes = await pool.query(
+        `SELECT e.id, e.name
+         FROM employees e
+         JOIN employee_services es ON es.employee_id = e.id
+         WHERE es.service_id = $1 AND e.is_active = true`,
+        [service_id]
+      );
+      if (!empRes.rows.length)
+        return res.status(404).json({ error: "Brak pracowników wykonujących tę usługę" });
+      employees = empRes.rows;
+    }
+
+    // 🔹 Sprawdź święta salonu
+    const salonRes = await pool.query(
+      `SELECT DISTINCT s.id
+       FROM salons s
+       JOIN employees e ON e.salon_id = s.id
+       WHERE e.id = $1 LIMIT 1`,
+      [employee_id || employees[0].id]
+    );
+
+    const salonId = salonRes.rows[0]?.id;
+    if (salonId) {
+      const hol = await pool.query(
+        "SELECT 1 FROM salon_holidays WHERE salon_id = $1 AND date = $2",
+        [salonId, date]
+      );
+      if (hol.rows.length > 0) {
+        console.log("🏖️ Salon ma dzień wolny:", date);
+        return res.json([]);
+      }
+    }
+
+    const results = [];
+
+    // 🔁 Generowanie slotów dla każdego pracownika
+    for (const emp of employees) {
+      const scheduleRes = await pool.query(
+        `SELECT open_time, close_time, is_day_off
+         FROM employee_schedule
+         WHERE employee_id = $1 AND day_of_week = $2`,
+        [emp.id, dayOfWeek]
+      );
+
+      if (!scheduleRes.rows.length || scheduleRes.rows[0].is_day_off) continue;
+
+      const { open_time, close_time } = scheduleRes.rows[0];
+      const [openH, openM] = open_time.split(":").map(Number);
+      const [closeH, closeM] = close_time.split(":").map(Number);
+
+      const start = new Date(`${date}T${openH.toString().padStart(2, "0")}:${openM.toString().padStart(2, "0")}:00`);
+      const end = new Date(`${date}T${closeH.toString().padStart(2, "0")}:${closeM.toString().padStart(2, "0")}:00`);
+
+      // 🔹 Urlopy
+      const vacRes = await pool.query(
+        `SELECT 1 FROM employee_vacations
+         WHERE employee_id = $1
+         AND $2::date BETWEEN start_date AND end_date`,
+        [emp.id, date]
+      );
+      if (vacRes.rows.length > 0) continue;
+
+      // 🔹 Istniejące rezerwacje
+      const appRes = await pool.query(
+        `SELECT start_time, end_time FROM appointments
+         WHERE employee_id = $1 AND date = $2 AND status = 'booked'`,
+        [emp.id, date]
+      );
+      const booked = appRes.rows.map(a => ({
+        start: new Date(`${date}T${a.start_time}`),
+        end: new Date(`${date}T${a.end_time}`),
+      }));
+
+      // 🔹 Generowanie slotów — pełna długość usługi + dodatki
+      let current = new Date(start);
+
+      while (current < end) {
+        const serviceEnd = new Date(current.getTime() + duration * 60000);
+        if (serviceEnd > end) break;
+
+        const overlap = booked.some(
+          (b) => current < b.end && serviceEnd > b.start
+        );
+
+        if (!overlap) {
+          results.push({
+            employee_id: emp.id,
+            employee_name: emp.name,
+            start_time: current.toTimeString().slice(0, 5),
+            end_time: serviceEnd.toTimeString().slice(0, 5),
+          });
+
+          current = new Date(serviceEnd.getTime());
+        } else {
+          const nextFree = booked
+            .filter((b) => b.end > current)
+            .sort((a, b) => a.end - b.end)[0];
+
+          current = nextFree
+            ? new Date(nextFree.end.getTime())
+            : new Date(serviceEnd.getTime());
+        }
+      }
+    }
+
+    // 🔹 Sortowanie wyników
+    results.sort((a, b) => {
+      if (a.start_time === b.start_time) return a.employee_id - b.employee_id;
+      return a.start_time.localeCompare(b.start_time);
+    });
+
+    console.log("🟢 Available slots:", results.slice(0, 10));
+    res.json(results);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu dostępnych terminów:", err);
+    res.status(500).json({ error: "Błąd serwera przy generowaniu slotów" });
+  }
+});
+
+
+
+
+// --- Tworzenie rezerwacji ---
+app.post("/api/appointments", verifyToken, async (req, res) => {
+  try {
+    const { employee_id, service_id, date, start_time, end_time, addons = [] } = req.body;
+    const client_uid = req.user?.uid;
+
+    if (!client_uid) return res.status(401).json({ error: "Brak autoryzacji" });
+    if (!employee_id || !service_id || !date || !start_time || !end_time)
+      return res.status(400).json({ error: "Brak wymaganych danych" });
+
+    // 🔹 Sprawdź, czy klient nie ma już zarezerwowanej TEJ SAMEJ usługi w tym dniu
+const existing = await pool.query(
+  `SELECT 1 FROM appointments 
+   WHERE client_uid = $1 
+   AND date = $2 
+   AND service_id = $3 
+   AND status = 'booked'`,
+  [client_uid, date, service_id]
+);
+
+if (existing.rows.length > 0) {
+  return res.status(400).json({ error: "Masz już zarezerwowaną tę usługę w tym dniu" });
+}
+
+    // 🔹 Sprawdź, czy termin jest wolny (pomijając anulowane)
+    const conflict = await pool.query(
+      `SELECT 1 FROM appointments
+       WHERE employee_id = $1
+       AND date = $2
+       AND status = 'booked'
+       AND ( (start_time, end_time) OVERLAPS ($3::time, $4::time) )`,
+      [employee_id, date, start_time, end_time]
+    );
+
+    if (conflict.rows.length > 0) {
+      return res.status(400).json({ error: "Ten termin jest już zajęty" });
+    }
+
+    // 🔹 Pobierz salon pracownika (dla spójności danych)
+    const salonRes = await pool.query(
+      `SELECT salon_id FROM employees WHERE id = $1`,
+      [employee_id]
+    );
+    if (!salonRes.rows.length)
+      return res.status(404).json({ error: "Nie znaleziono pracownika" });
+    const salon_id = salonRes.rows[0].salon_id;
+
+    // 🔹 Utwórz rezerwację
+    const result = await pool.query(
+      `INSERT INTO appointments 
+        (salon_id, employee_id, client_uid, service_id, date, start_time, end_time, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'booked')
+       RETURNING id`,
+      [salon_id, employee_id, client_uid, service_id, date, start_time, end_time]
+    );
+
+    const appointmentId = result.rows[0].id;
+
+    // 🔹 Jeśli wybrano dodatki, zapisz je
+    if (addons.length > 0) {
+      for (const addonId of addons) {
+        await pool.query(
+          `INSERT INTO appointment_addons (appointment_id, addon_id)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [appointmentId, addonId]
+        );
+      }
+    }
+
+    res.json({ message: "✅ Rezerwacja utworzona", appointment_id: appointmentId });
+  } catch (err) {
+    console.error("❌ Błąd przy tworzeniu rezerwacji:", err);
+    res.status(500).json({ error: "Błąd serwera przy tworzeniu rezerwacji" });
+  }
+});
+
+
+// --- Pobierz rezerwacje zalogowanego klienta ---
+app.get("/api/appointments/mine", verifyToken, async (req, res) => {
+  try {
+    if (!req.user?.uid)
+      return res.status(401).json({ error: "Brak autoryzacji" });
+
+    const result = await pool.query(
+      `
+      SELECT 
+        a.*, 
+        s.name AS service_name, 
+        s.price AS service_price, 
+        e.name AS employee_name,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'addon_id', sa.id,
+              'addon_name', sa.name,
+              'addon_price', sa.price,
+              'addon_duration', sa.duration_minutes
+            )
+          ) FILTER (WHERE sa.id IS NOT NULL),
+          '[]'
+        ) AS addons
+      FROM appointments a
+      JOIN services s ON a.service_id = s.id
+      JOIN employees e ON a.employee_id = e.id
+      LEFT JOIN appointment_addons aa ON aa.appointment_id = a.id
+      LEFT JOIN service_addons sa ON aa.addon_id = sa.id
+      WHERE a.client_uid = $1
+      GROUP BY a.id, s.name, s.price, e.name
+      ORDER BY a.date DESC, a.start_time DESC;
+      `,
+      [req.user.uid]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu rezerwacji:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu rezerwacji" });
+  }
+});
+
+
+
+// --- Lista pracowników danego salonu ---
+app.get("/api/employees/mine", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const { salon_id } = req.query;
+
+    if (!salon_id) {
+      return res.status(400).json({ error: "Brak salon_id w zapytaniu" });
+    }
+
+    const salonCheck = await pool.query(
+      "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+      [salon_id, req.user.uid]
+    );
+
+    if (salonCheck.rows.length === 0) {
+      return res.status(403).json({ error: "Nie masz dostępu do tego salonu" });
+    }
+
+    // 🔹 TUTAJ popraw SELECT:
+    const result = await pool.query(
+      `SELECT id, name, email, phone, description, image_url, is_active, created_at
+       FROM employees
+       WHERE salon_id = $1
+       ORDER BY created_at DESC`,
+      [salon_id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu pracowników:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu listy pracowników" });
+  }
+});
+
+
+
+
+// --- Usługi dostępne dla klientów ---
+app.get("/api/services/public", verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM services WHERE is_active = true ORDER BY name");
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd pobierania usług publicznych:", err);
+    res.status(500).json({ error: "Błąd pobierania usług" });
+  }
+});
+
+// --- Pracownicy dostępni dla klientów ---
+app.get("/api/employees/public", verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, name, description FROM employees WHERE is_active = true ORDER BY name"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd pobierania pracowników publicznych:", err);
+    res.status(500).json({ error: "Błąd pobierania pracowników" });
+  }
+});
+
+// --- Pracownicy przypisani do konkretnej usługi (dla klienta) ---
+app.get("/api/employees/by-service/:serviceId", async (req, res) => {
+  const { serviceId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        e.id, 
+        e.name, 
+        e.description, 
+        e.image_url  -- 👈 tu dodane zdjęcie!
+      FROM employees e
+      JOIN employee_services es ON es.employee_id = e.id
+      WHERE es.service_id = $1 AND e.is_active = true
+      ORDER BY e.name;
+      `,
+      [serviceId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu pracowników dla usługi:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu pracowników dla tej usługi" });
+  }
+});
+
+
+// --- Dodawanie nowej usługi dodatkowej (tylko właściciel) ---
+app.post("/api/service-addons", verifyToken, requireProviderRole, async (req, res) => {
+  const { name, duration_minutes, price, description, service_ids, salon_id } = req.body;
+
+  try {
+    // 🔹 Sprawdź, czy salon istnieje i należy do właściciela
+    const salonCheck = await pool.query(
+      "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+      [salon_id, req.user.uid]
+    );
+
+    if (salonCheck.rows.length === 0) {
+      return res.status(403).json({ error: "Nie masz uprawnień do tego salonu" });
+    }
+
+    // 🔹 Utwórz dodatek
+    const addonRes = await pool.query(
+      `INSERT INTO service_addons (salon_id, name, duration_minutes, price, description)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id`,
+      [salon_id, name, duration_minutes, price, description]
+    );
+    const addonId = addonRes.rows[0].id;
+
+    // 🔹 Przypisz do wybranych usług tego salonu
+    if (Array.isArray(service_ids) && service_ids.length > 0) {
+      for (const sid of service_ids) {
+        await pool.query(
+          `INSERT INTO service_addon_links (service_id, addon_id)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [sid, addonId]
+        );
+      }
+    }
+
+    res.json({ message: "✅ Dodano usługę dodatkową", addon_id: addonId });
+  } catch (err) {
+    console.error("❌ Błąd przy dodawaniu dodatku:", err);
+    res.status(500).json({ error: "Błąd przy dodawaniu dodatku" });
+  }
+});
+
+
+
+// --- Pobranie wszystkich dodatków salonu z powiązaniami ---
+app.get("/api/service-addons/all", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+   const salonId = req.query.salon_id
+  ? Number(req.query.salon_id)
+  : (await pool.query("SELECT id FROM salons WHERE owner_uid = $1 LIMIT 1", [req.user.uid])).rows[0]?.id;
+
+
+    const result = await pool.query(
+      `
+      SELECT a.*, 
+             COALESCE(json_agg(s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS linked_services
+      FROM service_addons a
+      LEFT JOIN service_addon_links l ON a.id = l.addon_id
+      LEFT JOIN services s ON l.service_id = s.id
+      WHERE a.salon_id = $1
+      GROUP BY a.id
+      ORDER BY a.name;
+      `,
+      [salonId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu dodatków:", err);
+    res.status(500).json({ error: "Błąd serwera przy pobieraniu dodatków" });
+  }
+});
+
+
+// --- Edycja usługi ---
+app.put("/api/services/:id", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+  const { name, duration_minutes, price, description } = req.body;
+
+  try {
+    // 🔹 Sprawdź, czy usługa należy do salonu właściciela
+    const serviceCheck = await pool.query(
+      `SELECT s.id 
+       FROM services s 
+       JOIN salons sa ON s.salon_id = sa.id 
+       WHERE s.id = $1 AND sa.owner_uid = $2`,
+      [id, req.user.uid]
+    );
+
+    if (serviceCheck.rows.length === 0)
+      return res.status(403).json({ error: "Brak uprawnień do tej usługi" });
+
+    const result = await pool.query(
+      `UPDATE services
+       SET name=$1, duration_minutes=$2, price=$3, description=$4
+       WHERE id=$5
+       RETURNING *`,
+      [name, duration_minutes, price, description, id]
+    );
+
+    res.json({ message: "✅ Usługa zaktualizowana", service: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Błąd edycji usługi:", err);
+    res.status(500).json({ error: "Błąd przy edycji usługi" });
+  }
+});
+
+// --- Usuwanie usługi ---
+app.delete("/api/services/:id", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM services
+       WHERE id=$1 AND salon_id IN (
+         SELECT id FROM salons WHERE owner_uid = $2
+       ) RETURNING id`,
+      [id, req.user.uid]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Nie znaleziono usługi lub brak uprawnień" });
+
+    res.json({ message: "🗑️ Usługa usunięta" });
+  } catch (err) {
+    console.error("❌ Błąd przy usuwaniu usługi:", err);
+    res.status(500).json({ error: "Błąd przy usuwaniu usługi" });
+  }
+});
+
+// --- Edycja dodatku ---
+app.put("/api/service-addons/:id", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+  const { name, duration_minutes, price, description } = req.body;
+
+  try {
+    const addonCheck = await pool.query(
+      `SELECT a.id 
+       FROM service_addons a 
+       JOIN salons s ON a.salon_id = s.id 
+       WHERE a.id = $1 AND s.owner_uid = $2`,
+      [id, req.user.uid]
+    );
+
+    if (addonCheck.rows.length === 0)
+      return res.status(403).json({ error: "Brak uprawnień do tego dodatku" });
+
+    const result = await pool.query(
+      `UPDATE service_addons
+       SET name=$1, duration_minutes=$2, price=$3, description=$4
+       WHERE id=$5
+       RETURNING *`,
+      [name, duration_minutes, price, description, id]
+    );
+
+    res.json({ message: "✅ Dodatek zaktualizowany", addon: result.rows[0] });
+  } catch (err) {
+    console.error("❌ Błąd edycji dodatku:", err);
+    res.status(500).json({ error: "Błąd przy edycji dodatku" });
+  }
+});
+
+// --- Usuwanie dodatku ---
+app.delete("/api/service-addons/:id", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM service_addons
+       WHERE id=$1 AND salon_id IN (
+         SELECT id FROM salons WHERE owner_uid = $2
+       )
+       RETURNING id`,
+      [id, req.user.uid]
+    );
+
+    if (result.rows.length === 0)
+      return res.status(404).json({ error: "Nie znaleziono dodatku lub brak uprawnień" });
+
+    res.json({ message: "🗑️ Dodatek usunięty" });
+  } catch (err) {
+    console.error("❌ Błąd przy usuwaniu dodatku:", err);
+    res.status(500).json({ error: "Błąd przy usuwaniu dodatku" });
+  }
+});
+
+
+
+
+// --- Pobranie dodatków przypisanych do konkretnej usługi (dla klienta) ---
+app.get("/api/service-addons/by-service/:serviceId", verifyToken, async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+    const result = await pool.query(
+      `
+      SELECT a.*
+      FROM service_addons a
+      JOIN service_addon_links l ON a.id = l.addon_id
+      WHERE l.service_id = $1 AND a.is_active = true
+      ORDER BY a.name
+      `,
+      [serviceId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu dodatków:", err);
+    res.status(500).json({ error: "Błąd serwera" });
+  }
+});
+
+// --- Publiczna lista salonów (dla klientów) ---
+app.get("/api/salons/public", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, name, city, street, street_number, phone, description, image_url
+      FROM salons
+      WHERE is_active = true
+      ORDER BY name;
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd pobierania salonów publicznych:", err);
+    res.status(500).json({ error: "Błąd pobierania salonów publicznych" });
+  }
+});
+
+
+app.get("/api/services/by-salon/:salonId", async (req, res) => {
+  try {
+    const { salonId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        s.id, 
+        s.name, 
+        s.duration_minutes, 
+        s.price, 
+        s.description, 
+        s.image_url, 
+        s.is_active, 
+        s.created_at,
+        COALESCE(
+          json_agg(es.employee_id) FILTER (WHERE es.employee_id IS NOT NULL),
+          '[]'
+        ) AS employee_ids
+      FROM services s
+      LEFT JOIN employee_services es ON es.service_id = s.id
+      WHERE s.salon_id = $1 AND s.is_active = true
+      GROUP BY s.id
+      ORDER BY s.name;
+      `,
+      [salonId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu usług salonu:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu usług salonu" });
+  }
+});
+
+
+
+
+// --- Pobierz pojedynczą usługę po ID (dla klientów) ---
+app.get("/api/service/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `SELECT id, salon_id, name, duration_minutes, price, description, image_url, is_active 
+       FROM services 
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Nie znaleziono usługi" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu usługi:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu usługi" });
+  }
+});
+
+
+// --- Lista WSZYSTKICH salonów zalogowanego właściciela ---
+app.get("/api/salons/mine/all", verifyToken, requireProviderRole, async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM salons WHERE owner_uid = $1 ORDER BY created_at DESC",
+      [req.user.uid]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu listy salonów:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu listy salonów" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --- Pobierz wszystkie dostępne kategorie ---
+app.get("/api/categories", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM categories ORDER BY name");
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu kategorii:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu kategorii" });
+  }
+});
+
+// --- Przypisz kategorie do salonu ---
+app.post("/api/salons/:id/categories", verifyToken, requireProviderRole, async (req, res) => {
+  const { id } = req.params;
+  const { category_ids } = req.body; // tablica ID kategorii
+
+  if (!Array.isArray(category_ids))
+    return res.status(400).json({ error: "category_ids musi być tablicą" });
+
+  try {
+    // sprawdź, czy salon należy do właściciela
+    const salonCheck = await pool.query(
+      "SELECT id FROM salons WHERE id=$1 AND owner_uid=$2",
+      [id, req.user.uid]
+    );
+    if (salonCheck.rows.length === 0)
+      return res.status(403).json({ error: "Brak uprawnień do salonu" });
+
+    // usuń stare powiązania
+    await pool.query("DELETE FROM salon_categories WHERE salon_id=$1", [id]);
+
+    // dodaj nowe powiązania
+    for (const catId of category_ids) {
+      await pool.query(
+        `INSERT INTO salon_categories (salon_id, category_id)
+         VALUES ($1, $2)
+         ON CONFLICT DO NOTHING`,
+        [id, catId]
+      );
+    }
+
+    res.json({ message: "✅ Kategorie przypisane do salonu" });
+  } catch (err) {
+    console.error("❌ Błąd przy przypisywaniu kategorii:", err);
+    res.status(500).json({ error: "Błąd przy przypisywaniu kategorii" });
+  }
+});
+
+// --- Pobierz kategorie konkretnego salonu ---
+app.get("/api/salons/:id/categories", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT c.id, c.name
+       FROM salon_categories sc
+       JOIN categories c ON c.id = sc.category_id
+       WHERE sc.salon_id = $1
+       ORDER BY c.name`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("❌ Błąd przy pobieraniu kategorii salonu:", err);
+    res.status(500).json({ error: "Błąd przy pobieraniu kategorii salonu" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+app.get("/api/appointments/unavailable-days", async (req, res) => {
+  try {
+    const { service_id, employee_id, year, month } = req.query;
+
+    // 🔹 Walidacja parametrów
+    if (!service_id && !employee_id) {
+      return res.status(400).json({ error: "Brak service_id lub employee_id" });
+    }
+    if (!year || !month) {
+      return res.status(400).json({ error: "Brak parametru year lub month" });
+    }
+
+    // 🔹 Wspólny fragment generujący dni z danego miesiąca
+    const dateRangeSQL = `
+      WITH month_days AS (
+        SELECT generate_series(
+          make_date($1::int, $2::int, 1),
+          (make_date($1::int, $2::int, 1) + INTERVAL '1 month - 1 day')::date,
+          interval '1 day'
+        ) AS date
+      )
+    `;
+
+    // 🔹 Jeśli wybrano konkretnego pracownika
+    if (employee_id) {
+      const query = `
+        , emp AS (
+          SELECT id, salon_id FROM employees WHERE id = $3
+        ),
+        schedule AS (
+          SELECT day_of_week, open_time, close_time, is_day_off
+          FROM employee_schedule
+          WHERE employee_id = $3
+        ),
+        holidays AS (
+          SELECT date FROM salon_holidays
+          WHERE salon_id = (SELECT salon_id FROM emp)
+        ),
+        vacations AS (
+          SELECT start_date, end_date FROM employee_vacations
+          WHERE employee_id = $3
+        ),
+        appointments_summary AS (
+          SELECT 
+            date,
+            SUM(EXTRACT(EPOCH FROM (end_time - start_time)) / 60) AS booked_minutes
+          FROM appointments
+          WHERE employee_id = $3 AND status = 'booked'
+          GROUP BY date
+        )
+        SELECT 
+          to_char(d.date, 'YYYY-MM-DD') AS date
+        FROM month_days d
+        WHERE
+          -- święta salonu
+          d.date IN (SELECT date FROM holidays)
+          OR -- urlop
+          EXISTS (SELECT 1 FROM vacations v WHERE d.date BETWEEN v.start_date AND v.end_date)
+          OR -- dzień wolny
+          (EXTRACT(DOW FROM d.date) IN (SELECT day_of_week FROM schedule WHERE is_day_off = true))
+          OR -- w pełni zajęty
+          (
+            (SELECT SUM(EXTRACT(EPOCH FROM (close_time - open_time)) / 60)
+             FROM schedule s 
+             WHERE s.day_of_week = EXTRACT(DOW FROM d.date)
+            ) <= COALESCE((SELECT booked_minutes FROM appointments_summary a WHERE a.date = d.date), 0)
+          )
+        ORDER BY date;
+      `;
+      const result = await pool.query(`${dateRangeSQL}${query}`, [year, month, employee_id]);
+      return res.json(result.rows.map((r) => r.date));
+    }
+
+    // 🔹 Jeśli „dowolny” — sprawdzamy wszystkich przypisanych do usługi
+    const employeesRes = await pool.query(
+      `SELECT e.id, e.salon_id
+       FROM employees e
+       JOIN employee_services es ON es.employee_id = e.id
+       WHERE es.service_id = $1 AND e.is_active = true`,
+      [service_id]
+    );
+
+    if (employeesRes.rows.length === 0) return res.json([]);
+
+    const employees = employeesRes.rows;
+    const salonId = employees[0].salon_id;
+
+    // 🔹 Święta salonu (dla wszystkich)
+    const holidaysRes = await pool.query(
+      `SELECT to_char(date, 'YYYY-MM-DD') AS date FROM salon_holidays WHERE salon_id = $1`,
+      [salonId]
+    );
+    const holidays = holidaysRes.rows.map((r) => r.date);
+
+    // 🔹 Zbierz dni niedostępne dla każdego pracownika
+    const unavailableMap = new Map();
+
+    for (const emp of employees) {
+      const q = await pool.query(
+        `${dateRangeSQL}
+        SELECT 
+          to_char(d.date, 'YYYY-MM-DD') AS date
+        FROM month_days d
+        WHERE
+          d.date IN (SELECT date FROM salon_holidays WHERE salon_id = $4)
+          OR EXISTS (SELECT 1 FROM employee_vacations v WHERE v.employee_id = $3 AND d.date BETWEEN v.start_date AND v.end_date)
+          OR (EXTRACT(DOW FROM d.date) IN (SELECT day_of_week FROM employee_schedule WHERE employee_id = $3 AND is_day_off = true))
+          OR (
+            (SELECT SUM(EXTRACT(EPOCH FROM (close_time - open_time)) / 60)
+             FROM employee_schedule s 
+             WHERE s.employee_id = $3 AND s.day_of_week = EXTRACT(DOW FROM d.date)
+            ) <= COALESCE((
+              SELECT SUM(EXTRACT(EPOCH FROM (end_time - start_time)) / 60)
+              FROM appointments a
+              WHERE a.employee_id = $3 AND a.date = d.date AND a.status = 'booked'
+            ), 0)
+          )
+        `,
+        [year, month, emp.id, salonId]
+      );
+
+      q.rows.forEach((r) => {
+        const date = r.date;
+        unavailableMap.set(date, (unavailableMap.get(date) || 0) + 1);
+      });
+    }
+
+    // 🔹 Dni, w których WSZYSCY są niedostępni (lub święta)
+    const totalEmps = employees.length;
+    const fullyUnavailable = holidays.filter(Boolean);
+
+    for (const [date, count] of unavailableMap.entries()) {
+      if (count === totalEmps) fullyUnavailable.push(date);
+    }
+
+    const unique = [...new Set(fullyUnavailable)];
+    res.json(unique);
+  } catch (err) {
+    console.error("❌ Błąd /unavailable-days:", err);
+    res.status(500).json({ error: "Błąd serwera" });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// --- Test backendu ---
+app.get("/", (req, res) => res.send("🚀 Backend działa poprawnie"));
+
+// --- Uruchomienie serwera ---
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on http://0.0.0.0:${PORT}`);
+});

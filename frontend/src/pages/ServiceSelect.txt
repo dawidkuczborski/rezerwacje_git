@@ -1,0 +1,566 @@
+import React, { useEffect, useState } from "react";
+import axios from "axios";
+import { ArrowLeft, Star, MapPin, Phone, Plus, Check } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+
+export default function ServiceSelect({ onSelect }) {
+  const [services, setServices] = useState([]);
+  const [addons, setAddons] = useState({});
+  const [selectedAddons, setSelectedAddons] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(null);
+  const [activeTab, setActiveTab] = useState("uslugi");
+  const navigate = useNavigate();
+
+  // ✅ używamy useState zamiast zwykłego const
+  const [salon, setSalon] = useState(() =>
+    JSON.parse(localStorage.getItem("selectedSalon"))
+  );
+
+// 🔁 Sprawdź przy każdym wejściu, czy salon się zmienił
+useEffect(() => {
+  const currentSalon = JSON.parse(localStorage.getItem("selectedSalon"));
+  if (currentSalon && currentSalon.id !== salon?.id) {
+    setSalon(currentSalon);
+  }
+}, []);
+
+
+  const backendBase = import.meta.env.VITE_API_URL;
+
+  // ✅ Jeśli salon nie ma image_url, spróbuj go uzupełnić z allSalons
+  useEffect(() => {
+    const allSalons = JSON.parse(localStorage.getItem("allSalons") || "[]");
+    if (salon && !salon.image_url) {
+      const fullSalon = allSalons.find((s) => s.id === salon.id);
+      if (fullSalon) {
+        localStorage.setItem("selectedSalon", JSON.stringify(fullSalon));
+        setSalon(fullSalon); // bez reloadu — dynamicznie
+      }
+    }
+  }, []);
+
+useEffect(() => {
+  import("./Booking.jsx");
+}, []);
+
+  // odczytaj motyw z localStorage i ustaw klasę 'dark' na html
+  useEffect(() => {
+    const stored = localStorage.getItem("theme") || "dark";
+    const html = document.documentElement;
+    if (stored === "dark") html.classList.add("dark");
+    else html.classList.remove("dark");
+  }, []);
+
+  const isDark =
+    document.documentElement.classList.contains("dark") ||
+    localStorage.getItem("theme") === "dark";
+  const PRIMARY = "#E57B2C";
+
+  
+  
+  
+  
+  
+  
+  useEffect(() => {
+  if (!salon?.id) {
+    setLoading(false);
+    return;
+  }
+
+  const fetchFilteredServices = async () => {
+    try {
+      const storedService = JSON.parse(localStorage.getItem("selectedService"));
+      const fromRebook = storedService?.fromRebook;
+      const rebookEmployeeId = storedService?.employee_id;
+
+      // 1️⃣ Pobierz wszystkie usługi salonu
+      const res = await axios.get(`${backendBase}/api/services/by-salon/${salon.id}`);
+      const allServices = res.data || [];
+
+      // Tryb „Umów ponownie” → tylko usługi przypisane do tego pracownika
+      if (fromRebook && rebookEmployeeId) {
+        const empRes = await axios.get(`${backendBase}/api/services/by-employee/${rebookEmployeeId}`);
+        const empServices = empRes.data || [];
+
+        // Filtrujemy po ID
+        const filtered = allServices.filter(svc =>
+          empServices.some(empSvc => empSvc.id === svc.id)
+        );
+
+        setServices(filtered);
+        setLoading(false);
+        return;
+      }
+
+      // 2️⃣ Normalny tryb — filtrujemy tylko usługi przypisane do jakiegokolwiek pracownika
+      const checks = await Promise.all(
+        allServices.map(async (svc) => {
+          try {
+            const r = await axios.get(`${backendBase}/api/employees/by-service/${svc.id}`);
+            return { svc, hasEmployees: Array.isArray(r.data) && r.data.length > 0 };
+          } catch {
+            return { svc, hasEmployees: false };
+          }
+        })
+      );
+
+      const filtered = checks.filter(c => c.hasEmployees).map(c => c.svc);
+      setServices(filtered);
+    } catch (err) {
+      console.error("❌ Błąd pobierania usług:", err);
+      setServices([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchFilteredServices();
+}, [salon, backendBase]);
+
+  
+  
+  
+  
+  
+  
+  
+
+useEffect(() => {
+  import("./Booking.jsx");
+}, []);
+
+
+  useEffect(() => {
+    if (services.length > 0) {
+      services.forEach(async (s) => {
+        try {
+          const res = await axios.get(
+            `${backendBase}/api/service-addons/by-service/${s.id}`
+          );
+          setAddons((prev) => ({ ...prev, [s.id]: res.data }));
+        } catch (err) {
+          console.error(`Błąd pobierania dodatków dla ${s.name}:`, err);
+        }
+      });
+    }
+  }, [services]);
+
+  const toggleAddons = (id) => {
+    setExpanded(expanded === id ? null : id);
+  };
+
+  const toggleAddon = (serviceId, addonId) => {
+    setSelectedAddons((prev) => {
+      const current = prev[serviceId] || [];
+      return current.includes(addonId)
+        ? { ...prev, [serviceId]: current.filter((id) => id !== addonId) }
+        : { ...prev, [serviceId]: [...current, addonId] };
+    });
+  };
+
+  const calculateTotals = (service) => {
+    const selected = selectedAddons[service.id] || [];
+    const serviceAddons = addons[service.id] || [];
+    const chosen = serviceAddons.filter((a) => selected.includes(a.id));
+    const extraPrice = chosen.reduce(
+      (sum, a) => sum + Number(a.price || 0),
+      0
+    );
+    const extraTime = chosen.reduce(
+      (sum, a) => sum + Number(a.duration_minutes || 0),
+      0
+    );
+    return {
+      totalPrice: Number(service.price) + extraPrice,
+      totalDuration: Number(service.duration_minutes) + extraTime,
+    };
+  };
+
+ const handleSelect = async (service) => {
+  const selected = selectedAddons[service.id] || [];
+  const { totalPrice, totalDuration } = calculateTotals(service);
+
+  const start_time = "00:00";
+  const base = Number(service.duration_minutes || 0);
+  const extra = (addons[service.id] || [])
+    .filter((a) => selected.includes(a.id))
+    .reduce((s, a) => s + Number(a.duration_minutes || 0), 0);
+  const total = base + extra;
+  const [h, m] = start_time.split(":").map(Number);
+  const start = new Date();
+  start.setHours(h, m, 0, 0);
+  const end = new Date(start.getTime() + total * 60000);
+  const computedEndTime = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+
+  const fullService = {
+    ...service,
+    selectedAddons: selected,
+    totalPrice,
+    totalDuration,
+    start_time,
+    end_time: computedEndTime,
+  };
+
+  localStorage.setItem("selectedService", JSON.stringify(fullService));
+
+  if (onSelect) onSelect(fullService);
+
+  // ⚡️ preloading Booking component
+  await import("./Booking.jsx");
+
+  // ✨ micro-delay (nie wizualny — tylko żeby React nie wyczyścił DOM natychmiast)
+  requestAnimationFrame(() => navigate("/booking"));
+};
+
+
+
+  if (!salon)
+    return (
+      <div
+        className={`min-h-screen flex items-center justify-center ${
+          isDark ? "bg-gray-900 text-gray-300" : "bg-gray-50 text-gray-600"
+        }`}
+      >
+        ⚠️ Nie wybrano salonu.{" "}
+        <a
+          href="/salons"
+          className="ml-2 underline"
+          style={{ color: PRIMARY }}
+        >
+          Wybierz salon
+        </a>
+      </div>
+    );
+
+  if (loading)
+    return (
+      <div
+        className={`min-h-screen flex items-center justify-center text-lg ${
+          isDark ? "bg-gray-900 text-gray-400" : "bg-gray-50 text-gray-600"
+        }`}
+      >
+        ⏳ Ładowanie usług...
+      </div>
+    );
+
+  return (
+    <div
+      className={`min-h-screen px-5 py-6 font-sans ${
+        isDark ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-900"
+      }`}
+    >
+      {/* Nagłówek z powrotem */}
+      <div className="flex items-center mb-6">
+        <button
+          onPointerDown={() => navigate("/salons")}
+          className={`flex items-center gap-2 active:scale-95 transition ${
+            isDark
+              ? "text-gray-300 hover:text-white"
+              : "text-gray-700 hover:text-black"
+          }`}
+        >
+          <ArrowLeft size={22} />
+          <span>Powrót</span>
+        </button>
+      </div>
+
+      {/* Nagłówek salonu */}
+      <div className="flex items-center gap-4 mb-8">
+        <div
+          className={`w-24 h-24 rounded-full overflow-hidden flex items-center justify-center flex-shrink-0 ${
+            isDark ? "bg-gray-800" : "bg-gray-200"
+          }`}
+        >
+          {salon.image_url ? (
+            <img
+              src={`${backendBase}/uploads/${salon.image_url}`}
+              alt={salon.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="text-gray-500 text-sm">📷</div>
+          )}
+        </div>
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">{salon.name}</h1>
+          <p className={`text-sm mb-2 ${isDark ? "text-gray-400" : "text-gray-600"}`}>
+            {salon.description || "Brak opisu salonu."}
+          </p>
+          <div
+            className={`flex items-center gap-2 text-sm mb-1 ${
+              isDark ? "text-gray-400" : "text-gray-700"
+            }`}
+          >
+            <MapPin size={16} />
+            <span>
+              {salon.street} {salon.street_number}, {salon.city}
+            </span>
+          </div>
+          <button
+            className="text-sm hover:underline"
+            style={{ color: PRIMARY }}
+          >
+            Jak dojechać?
+          </button>
+          <div
+            className={`flex items-center gap-2 text-sm mt-1 ${
+              isDark ? "text-gray-300" : "text-gray-700"
+            }`}
+          >
+            <Phone size={16} />
+            <span>{salon.phone || "Brak numeru"}</span>
+          </div>
+          <div
+            className={`flex items-center text-sm mt-2 ${
+              isDark ? "text-gray-300" : "text-gray-700"
+            }`}
+          >
+            <Star
+              size={16}
+              className="text-yellow-400 fill-yellow-400 mr-1"
+            />
+            <span>4,9</span>
+            <span
+              className={`ml-2 ${
+                isDark ? "text-gray-500" : "text-gray-400"
+              }`}
+            >
+              (487 opinii)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Zakładki */}
+      <div
+        className={`flex justify-around border-b mb-6 ${
+          isDark
+            ? "border-gray-700 text-gray-400"
+            : "border-gray-200 text-gray-500"
+        }`}
+      >
+        {["uslugi", "opinie", "portfolio"].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`pb-2 transition ${
+              activeTab === tab
+                ? `border-b-2 ${
+                    isDark ? "border-[#E57B2C] text-white" : "border-[#E57B2C] text-gray-900"
+                  }`
+                : isDark
+                ? "hover:text-white"
+                : "hover:text-black"
+            }`}
+          >
+            {tab === "uslugi"
+              ? "Usługi"
+              : tab === "opinie"
+              ? "Opinie"
+              : "Portfolio"}
+          </button>
+        ))}
+      </div>
+
+      {/* Sekcje */}
+      {activeTab === "uslugi" && (
+        <>
+          <h2 className="text-xl font-semibold mb-4">Popularne usługi</h2>
+          {services.length === 0 ? (
+            <p className={isDark ? "text-gray-500" : "text-gray-600"}>
+              Brak usług w tym salonie.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {services.map((s) => {
+                const { totalPrice, totalDuration } = calculateTotals(s);
+                const serviceAddons = addons[s.id] || [];
+                return (
+                  <div key={s.id}>
+                    <div
+                      className={`flex items-center justify-between rounded-2xl px-5 py-4 border shadow-sm ${
+                        isDark
+                          ? "bg-gray-800 border-gray-700"
+                          : "bg-white border-gray-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`w-16 h-16 rounded-full overflow-hidden flex items-center justify-center ${
+                            isDark ? "bg-gray-900" : "bg-gray-100"
+                          }`}
+                        >
+                          {s.image_url ? (
+  <img
+    src={`${backendBase}/uploads/${s.image_url}`}
+    alt={s.name}
+    className="object-cover w-full h-full"
+    onError={(e) => (e.target.style.display = "none")} // 🔸 ukryj jeśli nie istnieje
+  />
+) : (
+  <div className="text-gray-400 text-sm">brak</div>
+)}
+
+                        </div>
+                        <div>
+                          <h3 className="font-medium text-lg">{s.name}</h3>
+                         <div className="mt-1 leading-tight">
+						  <p
+							className={`${
+							  isDark ? "text-gray-200" : "text-gray-800"
+							} text-[15px] font-semibold`}
+						  >
+							{totalPrice.toFixed(2)} zł
+						  </p>
+						  <p
+							className={`${
+							  isDark ? "text-gray-400" : "text-gray-500"
+							} text-[13px]`}
+						  >
+							{totalDuration} min
+						  </p>
+						</div>
+
+                          {serviceAddons.length > 0 && (
+                            <button
+                              onClick={() => toggleAddons(s.id)}
+                              className={`flex items-center gap-1 mt-2 text-sm px-3 py-1 rounded-full transition ${
+                                isDark
+                                  ? "bg-gray-700 text-gray-300 hover:bg-gray-600"
+                                  : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                              }`}
+                            >
+                              <Plus size={14} /> Dodatki
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleSelect(s)}
+                        className="px-6 py-2 rounded-full font-medium transition shadow-sm active:scale-95"
+                        style={{
+                          background: PRIMARY,
+                          color: "#fff",
+                        }}
+                      >
+                        Wybierz
+                      </button>
+                    </div>
+                    {expanded === s.id && serviceAddons.length > 0 && (
+                      <div
+                        className={`border-t-0 rounded-b-2xl px-5 py-3 text-sm mt-[-6px] ${
+                          isDark
+                            ? "bg-gray-900 border border-gray-700 text-gray-300"
+                            : "bg-gray-50 border border-gray-200 text-gray-700"
+                        }`}
+                      >
+                        <p
+                          className={`mb-2 ${
+                            isDark ? "text-gray-400" : "text-gray-600"
+                          }`}
+                        >
+                          Dodatki:
+                        </p>
+                        <ul className="space-y-2">
+                          {serviceAddons.map((addon) => {
+                            const selected =
+                              selectedAddons[s.id]?.includes(addon.id) ||
+                              false;
+                            return (
+                              <li
+                                key={addon.id}
+                                onClick={() =>
+                                  toggleAddon(s.id, addon.id)
+                                }
+                                className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition ${
+                                  selected
+                                    ? "bg-[#E57B2C]/30"
+                                    : isDark
+                                    ? "bg-gray-800 hover:bg-gray-700"
+                                    : "bg-gray-100 hover:bg-gray-200"
+                                }`}
+                              >
+                                <div>
+                                  <p className="font-medium">{addon.name}</p>
+                                  <p
+                                    className={`text-xs ${
+                                      isDark
+                                        ? "text-gray-400"
+                                        : "text-gray-600"
+                                    }`}
+                                  >
+                                    +{addon.price} zł · +
+                                    {addon.duration_minutes} min
+                                  </p>
+                                </div>
+                                {selected ? (
+                                  <Check
+                                    size={18}
+                                    style={{ color: PRIMARY }}
+                                  />
+                                ) : (
+                                  <Plus size={18} />
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {activeTab === "opinie" && (
+        <div
+          className={`space-y-4 ${
+            isDark ? "text-gray-400" : "text-gray-600"
+          }`}
+        >
+          <h2
+            className={`text-xl font-semibold mb-4 ${
+              isDark ? "text-white" : "text-gray-900"
+            }`}
+          >
+            Opinie klientów
+          </h2>
+          <p>⭐️⭐️⭐️⭐️⭐️ „Świetne cięcie, klimat jak w filmie.”</p>
+          <p>⭐️⭐️⭐️⭐️ „Profesjonalnie i miło, polecam!”</p>
+          <p>⭐️⭐️⭐️⭐️⭐️ „Najlepszy barber w mieście.”</p>
+        </div>
+      )}
+
+      {activeTab === "portfolio" && (
+        <div className={isDark ? "text-gray-400" : "text-gray-600"}>
+          <h2
+            className={`text-xl font-semibold mb-4 ${
+              isDark ? "text-white" : "text-gray-900"
+            }`}
+          >
+            Portfolio
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                className={`aspect-square rounded-2xl flex items-center justify-center ${
+                  isDark
+                    ? "bg-gray-800 text-gray-500"
+                    : "bg-gray-200 text-gray-400"
+                }`}
+              >
+                📸
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,965 @@
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import axios from "axios";
+import { useAuth } from "../components/AuthProvider";
+import { Check, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+
+export default function Booking() {
+  const { firebaseUser } = useAuth();
+  const backendBase = import.meta.env.VITE_API_URL;
+  const navigate = useNavigate();
+
+  // ---------- INITIAL STATE (lazy reads from localStorage) ----------
+  const [availableServices, setAvailableServices] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("allServices") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const [service, setService] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("selectedService"));
+    } catch {
+      return null;
+    }
+  });
+
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [pageReady, setPageReady] = useState(true);
+
+  // UI state
+  const [showServiceSelect, setShowServiceSelect] = useState(false);
+  const [addons, setAddons] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [selectedAddons, setSelectedAddons] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState("any");
+  const [date, setDate] = useState(new Date());
+  const [monthDate, setMonthDate] = useState(new Date());
+  const [slots, setSlots] = useState([]);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+  const [computedEndTime, setComputedEndTime] = useState(null);
+  const [addonsOpen, setAddonsOpen] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [availableDays, setAvailableDays] = useState([]);
+  const [lockEmployeeSelection, setLockEmployeeSelection] = useState(false);
+  const [isRestoringRebook, setIsRestoringRebook] = useState(false);
+
+  // refs to avoid duplicate loads
+  const didInitRef = useRef(false);
+  const loadingServiceDataRef = useRef(false);
+
+  // theme helpers
+  const isDark = theme === "dark";
+  const PRIMARY = "#E57B2C";
+  const pageBgClass = isDark ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-900";
+  const subtextClass = isDark ? "text-gray-400" : "text-gray-500";
+  const borderClass = isDark ? "border-gray-700" : "border-gray-200";
+  const modalBg = isDark ? "bg-black/80" : "bg-black/50";
+  const successBg = isDark ? "bg-[#2b1a14]" : "bg-rose-100";
+
+  // ---------- EFFECT: theme on <html> ----------
+  useEffect(() => {
+    try {
+      const html = document.documentElement;
+      if (isDark) html.classList.add("dark");
+      else html.classList.remove("dark");
+      localStorage.setItem("theme", theme);
+    } catch (e) {
+      console.warn("Nie udało się ustawić motywu:", e);
+    }
+  }, [isDark, theme]);
+
+  // clear old success message on mount
+  useEffect(() => setMsg(""), []);
+
+  // ---------- UTILITIES ----------
+  const formatPrice = useCallback((v) => Number(v || 0).toFixed(2), []);
+  const formatIsoDate = useCallback((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, []);
+  const prettyDate = useCallback((d) => d.toLocaleDateString("pl-PL", { weekday: "long", year: "numeric", month: "long", day: "numeric" }), []);
+  const shortName = useCallback((full) => {
+    if (!full) return "";
+    const parts = full.split(" ");
+    const first = parts[0] || "";
+    const lastInitial = parts[1] ? parts[1][0] : "";
+    return `${first} ${lastInitial ? lastInitial + "." : ""}`;
+  }, []);
+
+  // ---------- FETCH HELPERS (consolidated to avoid multiple useEffects) ----------
+  const fetchServiceRelated = useCallback(async (svc, token = null) => {
+  if (!svc || !(svc.id || svc.service_id)) {
+  console.warn("⚠️ fetchServiceRelated: brak poprawnego obiektu service", svc);
+  return;
+}
+
+// ✅ jeśli mamy tylko service_id (np. z rebooka), przypisz go do id
+if (!svc.id && svc.service_id) {
+  svc.id = svc.service_id;
+}
+
+
+  if (loadingServiceDataRef.current) return;
+  loadingServiceDataRef.current = true;
+
+  try {
+    const headers = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+    const [addonsRes, empRes] = await Promise.all([
+      axios.get(`${backendBase}/api/service-addons/by-service/${svc.id}`, headers),
+      axios.get(`${backendBase}/api/employees/by-service/${svc.id}`, headers),
+    ]);
+
+    setAddons(addonsRes.data || []);
+    setEmployees(empRes.data || []);
+
+    // ✅ przywracanie dodatków (obsługuje selectedAddons i addon_ids)
+    try {
+      const stored = JSON.parse(localStorage.getItem("selectedService")) || {};
+	  // 🧩 Normalizacja: jeśli w localStorage jest tylko service_id, dodaj też id
+if (stored?.service_id && !stored?.id) {
+  stored.id = stored.service_id;
+  localStorage.setItem("selectedService", JSON.stringify(stored));
+}
+
+      const preIds = stored?.selectedAddons?.length
+        ? stored.selectedAddons
+        : stored?.addon_ids || [];
+
+      if (Array.isArray(preIds) && preIds.length) {
+        const mapped = (addonsRes.data || []).filter((a) => preIds.includes(a.id));
+        setSelectedAddons(mapped);
+      }
+    } catch (innerErr) {
+      console.warn("Nie udało się przywrócić dodatków:", innerErr);
+    }
+
+  } catch (err) {
+    console.error("Błąd pobierania dodatków/pracowników:", err);
+    setAddons([]);
+    setEmployees([]);
+  } finally {
+    loadingServiceDataRef.current = false;
+  }
+}, [backendBase]);
+
+
+  // fetch available days for calendar
+  // ✅ Poprawiona wersja z obsługą service_id i service.service_id
+const loadAvailableDays = useCallback(async (svc, monthRef = monthDate, employeeId = selectedEmployee) => {
+  // Sprawdź, czy mamy poprawny obiekt usługi
+  if (!svc || !(svc.id || svc.service_id)) {
+    console.warn("⚠️ loadAvailableDays: brak poprawnego service_id:", svc);
+    return;
+  }
+
+  try {
+    // 🔧 Ustal właściwe ID usługi
+    const serviceId = svc.id ?? svc.service_id;
+
+    // 🔧 Przygotuj parametry zapytania
+    const params = {
+      service_id: serviceId,
+      year: monthRef.getFullYear(),
+      month: monthRef.getMonth() + 1,
+    };
+
+    if (employeeId && employeeId !== "any") params.employee_id = employeeId;
+
+
+
+    console.log("📅 Pobieranie dni:", params);
+
+    const res = await axios.get("http://192.168.0.4:5000/api/appointments/available-days", { params });
+
+    console.log("✅ Otrzymano dni:", res.data);
+    setAvailableDays(res.data);
+  } catch (err) {
+    console.error("❌ Błąd pobierania dostępnych dni:", err);
+    setAvailableDays([]);
+  }
+}, [monthDate, selectedEmployee]);
+
+
+  // ---------- SLOTS ----------
+  const loadSlots = useCallback(async (selDate, employeeOverride = null, overrideServiceId = null) => {
+
+    if (!service) return;
+    setLoadingSlots(true);
+    try {
+      const employeeId = employeeOverride ?? selectedEmployee;
+      const params = new URLSearchParams({ service_id: overrideServiceId ?? service.id, date: formatIsoDate(selDate) });
+
+      if (employeeId !== "any" && employeeId) params.append("employee_id", employeeId);
+      if (selectedAddons.length > 0) selectedAddons.forEach((a) => params.append("addons", a.id));
+      const res = await axios.get(`${backendBase}/api/appointments/available?${params.toString()}`);
+
+      // unique by employee_id + start_time
+      const unique = [];
+      const seen = new Set();
+      (res.data || []).forEach((s) => {
+        const key = `${s.employee_id}__${s.start_time}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(s);
+        }
+      });
+
+      setSlots(unique);
+      setMsg(unique.length ? "" : "🚫 Brak wolnych terminów w tym dniu");
+    } catch (err) {
+      console.error("❌ Błąd pobierania terminów:", err);
+      setSlots([]);
+      setMsg("❌ Błąd pobierania terminów");
+    } finally {
+      setLoadingSlots(false);
+    }
+  }, [service, selectedEmployee, selectedAddons, backendBase, formatIsoDate]);
+
+  // ---------- INITIALIZATION & RE-BOOK RESTORE (merged/streamlined) ----------
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+
+    const init = async () => {
+      try {
+        setPageReady(true);
+
+        // load salon services list (if salon present)
+        try {
+          const salon = JSON.parse(localStorage.getItem("selectedSalon"));
+          if (salon?.id) {
+          const res = await axios.get(`${backendBase}/api/services/by-salon/${salon.id}`);
+
+// 🔥 Filtrowanie tylko usług przypisanych do zalogowanego użytkownika
+// 🔧 Normalizacja — upewniamy się, że employee_ids to zawsze tablica liczb
+const normalized = (res.data || []).map((svc) => ({
+  ...svc,
+  employee_ids: Array.isArray(svc.employee_ids)
+    ? svc.employee_ids.map(Number).filter(Boolean)
+    : svc.employee_id
+    ? [Number(svc.employee_id)]
+    : [],
+}));
+
+// 🔥 Filtruj tylko usługi przypisane do któregoś z aktualnych pracowników salonu
+// (czyli tych, którzy istnieją w tabeli employee_services)
+const filtered = normalized.filter((svc) => {
+  // jeśli nie ma przypisań → nie pokazuj (bo to "brak innych usług")
+  return svc.employee_ids && svc.employee_ids.length > 0;
+});
+
+console.log("✅ Usługi przypisane do pracowników:", filtered.map(f => ({
+  id: f.id,
+  name: f.name,
+  employee_ids: f.employee_ids,
+})));
+
+setAvailableServices(filtered);
+
+
+
+
+          }
+        } catch (e) {
+          console.warn("Nie udało się załadować usług salonu:", e);
+        }
+
+        // check rebook
+        const stored = JSON.parse(localStorage.getItem("selectedService")) || {};
+		// 🔧 Fix: dodaj id, jeśli istnieje tylko service_id
+if (stored.service_id && !stored.id) {
+  stored.id = stored.service_id;
+  localStorage.setItem("selectedService", JSON.stringify(stored));
+}
+        if (stored?.fromRebook) {
+  setIsRestoringRebook(true);
+  try {
+    // helper który próbuje dwa możliwe adresy: /api/service/:id oraz /api/services/:id
+    const getServiceById = async (id) => {
+      const urlsToTry = [
+        `${backendBase}/api/service/${id}`,
+        `${backendBase}/api/services/${id}`,
+      ];
+      let lastErr = null;
+      for (const url of urlsToTry) {
+        try {
+          const res = await axios.get(url);
+          return res.data;
+        } catch (err) {
+          lastErr = err;
+          if (err.response && err.response.status !== 404) throw err;
+        }
+      }
+      throw lastErr;
+    };
+
+    const svc = await getServiceById(stored.service_id);
+
+    // ✅ ustawiamy service natychmiast, żeby React go miał od razu
+    setService(svc);
+
+    localStorage.setItem(
+      "selectedService",
+      JSON.stringify({
+        ...stored,
+        id: svc.id,
+        name: svc.name,
+        price: svc.price,
+        duration_minutes: svc.duration_minutes,
+      })
+    );
+
+    // ✅ pobieramy dodatki i pracowników dla tego svc
+    await fetchServiceRelated(svc);
+
+    // ✅ przywracamy dodatki / pracownika
+    if (stored.addon_ids?.length) {
+      const mapped = (addons || []).filter((a) => stored.addon_ids.includes(a.id));
+      setSelectedAddons(mapped);
+    }
+    if (stored.employee_id) {
+      setSelectedEmployee(stored.employee_id);
+      setLockEmployeeSelection(true);
+      localStorage.setItem("lockEmployeeSelection", "true");
+    }
+
+    // ✅ ustawiamy datę i ładujemy sloty dla konkretnego svc
+    const now = new Date();
+    setDate(now);
+    setMonthDate(now);
+
+    if (svc?.id) {
+      const employeeId = stored.employee_id ?? "any";
+      console.log("🔁 Rebook: ładowanie slotów dla usługi", svc.id);
+      await loadSlots(now, employeeId);
+    } else {
+      console.warn("⚠️ Rebook: brak svc.id — pomijam loadSlots");
+    }
+
+  } catch (err) {
+    console.error("❌ Błąd przy odtwarzaniu danych 'Umów ponownie':", err);
+  } finally {
+    setIsRestoringRebook(false);
+  }
+  return;
+}
+
+
+        // if normal init: ensure service loaded from storage (but do not override if already present)
+        if (!service) {
+          if (stored) setService(stored);
+        }
+
+        // if we have a service, fetch related data
+        if (stored?.id) {
+          await fetchServiceRelated(stored);
+        }
+      } catch (e) {
+        console.warn("Błąd inicjalizacji:", e);
+      }
+    };
+
+    init();
+  }, [backendBase, fetchServiceRelated, loadSlots, service]);
+
+  // whenever service changes (and not restoring), fetch addons/employees and available days
+  useEffect(() => {
+    if (!service) return;
+    let mounted = true;
+    const tokenPromise = firebaseUser ? firebaseUser.getIdToken().catch(() => null) : Promise.resolve(null);
+
+    tokenPromise.then((token) => {
+      if (!mounted) return;
+      fetchServiceRelated(service, token);
+      loadAvailableDays(service, monthDate, selectedEmployee);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [service, firebaseUser, fetchServiceRelated, loadAvailableDays, monthDate, selectedEmployee]);
+
+  // refresh availableDays when month or selectedEmployee changes
+useEffect(() => {
+  if (!service?.id && !service?.service_id) {
+    console.log("⏳ Oczekiwanie na service.id lub service.service_id...");
+    return;
+  }
+
+  // ⏰ krótka zwłoka – pozwala Reactowi zakończyć aktualizację service z localStorage / rebooka
+  const t = setTimeout(() => {
+    loadAvailableDays(service, monthDate, selectedEmployee);
+  }, 200);
+
+  return () => clearTimeout(t);
+}, [service?.id, service?.service_id, monthDate, selectedEmployee]);
+
+
+
+// ✅ Auto-przejście do najbliższego dnia z wolnymi terminami (bez pętli)
+useEffect(() => {
+  if (!availableDays.length) return;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // jeżeli data jest w przeszłości
+  if (date < today) {
+    const newDate = new Date(today);
+    if (formatIsoDate(newDate) !== formatIsoDate(date)) {
+      console.log("⏩ Cofnięto wstecz — ustawiam dzisiejszą datę:", newDate);
+      setDate(newDate);
+      setMonthDate(new Date(newDate.getFullYear(), newDate.getMonth(), 1));
+    }
+    return;
+  }
+
+  const currentIso = formatIsoDate(date);
+
+  // jeśli obecny dzień nie jest dostępny
+  if (!availableDays.includes(currentIso)) {
+    const nextAvailable = availableDays
+      .map((d) => new Date(d))
+      .find((d) => d >= today);
+
+    // aktualizuj tylko, jeśli to naprawdę inny dzień
+    if (nextAvailable && formatIsoDate(nextAvailable) !== currentIso) {
+      console.log("📅 Brak slotów — przeskakuję do:", nextAvailable);
+      setDate(nextAvailable);
+      setMonthDate(new Date(nextAvailable.getFullYear(), nextAvailable.getMonth(), 1));
+    }
+  }
+}, [availableDays]); // ❗️bez 'date' w zależnościach
+
+
+
+  // lock employee selection if rebook
+  useEffect(() => {
+    try {
+      const storedService = JSON.parse(localStorage.getItem("selectedService"));
+      if (storedService?.fromRebook) {
+        localStorage.setItem("lockEmployeeSelection", "true");
+        setLockEmployeeSelection(true);
+      } else {
+        localStorage.removeItem("lockEmployeeSelection");
+        setLockEmployeeSelection(false);
+      }
+    } catch (e) {
+      localStorage.removeItem("lockEmployeeSelection");
+      setLockEmployeeSelection(false);
+    }
+  }, []);
+
+
+
+
+
+
+
+
+
+
+
+
+
+// 🔧 Filtrowanie dostępnych usług w zależności od widocznych pracowników
+// oraz obsługa trybu "Umów ponownie" (tylko 1 pracownik)
+useEffect(() => {
+  let allowedEmpIds = [];
+
+  // 1️⃣ Pobierz pracowników z listy na górze
+  const currentEmpIds = employees.map((e) => e.id);
+
+  // 2️⃣ Sprawdź, czy trwa rebook i odczytaj employee_id z localStorage
+  let rebookEmployeeId = null;
+  try {
+    const stored = JSON.parse(localStorage.getItem("selectedService")) || {};
+    if (stored.fromRebook && stored.employee_id) {
+      rebookEmployeeId = stored.employee_id;
+    }
+  } catch {}
+
+  // 3️⃣ Określ listę pracowników, dla których chcemy pokazać usługi
+  if (rebookEmployeeId) {
+    // Jeśli rebook → pokazujemy tylko usługi przypisane do tego jednego pracownika
+    allowedEmpIds = [rebookEmployeeId];
+  } else {
+    // Normalny przypadek → pokazujemy dla wszystkich aktualnie widocznych pracowników
+    allowedEmpIds = currentEmpIds;
+  }
+
+  console.log("👥 Dozwoleni pracownicy:", allowedEmpIds);
+
+  // Jeśli nadal brak pracowników — nic nie rób
+  if (!allowedEmpIds.length) return;
+
+  // 4️⃣ Przefiltruj usługi na podstawie przypisanych pracowników
+  setAvailableServices((prev) => {
+    const filtered = prev.filter((svc) => {
+      // jeśli usługa nie ma przypisań — pomiń
+      if (!svc.employee_ids || svc.employee_ids.length === 0) return false;
+      // jeśli którykolwiek pracownik z allowedEmpIds ma tę usługę → pokaż
+      return svc.employee_ids.some((id) => allowedEmpIds.includes(id));
+    });
+
+    console.log("💇‍♂️ Widoczne usługi:", filtered.map((f) => ({
+      id: f.id,
+      name: f.name,
+      employee_ids: f.employee_ids
+    })));
+
+    return filtered;
+  });
+}, [employees]);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  // refresh slots unless restoring rebook
+useEffect(() => {
+  // ⛔ Jeśli trwa przywracanie rebooka, nie rób nic
+  if (isRestoringRebook) {
+    console.log("⏸️ Pomijam loadSlots — trwa przywracanie rebooka...");
+    return;
+  }
+
+  // ⛔ Nie ma jeszcze service.id → czekamy
+  if (!service?.id) {
+    console.log("⏳ Czekam na service.id zanim pobiorę sloty...");
+    return;
+  }
+
+  // ✅ małe opóźnienie, żeby uniknąć kolizji z setService()
+  const t = setTimeout(() => {
+    loadSlots(date);
+  }, 100);
+
+  return () => clearTimeout(t);
+}, [date, selectedEmployee, selectedAddons, isRestoringRebook, service?.id]);
+
+
+  // compute end time
+  useEffect(() => {
+    if (!service) {
+      setComputedEndTime(null);
+      return;
+    }
+    const base = Number(service.duration_minutes || 0);
+    const extra = selectedAddons.reduce((s, a) => s + Number(a.duration_minutes || 0), 0);
+    const total = base + extra;
+    if (selectedSlot) {
+      const [h, m] = selectedSlot.start_time.split(":").map(Number);
+      const start = new Date();
+      start.setHours(h, m, 0, 0);
+      const end = new Date(start.getTime() + total * 60000);
+      setComputedEndTime(`${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`);
+    } else {
+      setComputedEndTime(null);
+    }
+  }, [selectedSlot, service, selectedAddons]);
+
+  // ---------- ACTIONS ----------
+  const handleSlotClick = (slot) => {
+    if (selectedSlot && selectedSlot.employee_id === slot.employee_id && selectedSlot.start_time === slot.start_time) {
+      setSelectedSlot(null);
+    } else {
+      setSelectedSlot(slot);
+    }
+  };
+
+  const toggleAddon = (addon) => {
+  setSelectedAddons((prev) => {
+    const exists = prev.some((a) => a.id === addon.id);
+    const updated = exists ? prev.filter((a) => a.id !== addon.id) : [...prev, addon];
+
+    try {
+      const stored = JSON.parse(localStorage.getItem("selectedService")) || {};
+
+      // 🔧 ZABEZPIECZENIE: jeśli brakuje service_id, przerwij rebook
+      if (!stored?.service_id) {
+        console.warn("⚠️ restoreRebook: brak service_id w localStorage, przerywam rebook");
+      } else {
+        stored.selectedAddons = updated.map((a) => a.id);
+        localStorage.setItem("selectedService", JSON.stringify(stored));
+      }
+
+    } catch (e) {
+      console.error("Błąd zapisu dodatków do localStorage", e);
+    }
+
+    return updated;
+  });
+};
+
+
+  const handleChangeService = async (newServiceId) => {
+    try {
+      const selected = availableServices.find((s) => s.id === Number(newServiceId) || s.id === newServiceId);
+      if (!selected) return;
+      setService(selected);
+      setSelectedAddons([]);
+      setSelectedSlot(null);
+      setSelectedEmployee("any");
+      setAddonsOpen(false);
+      setShowServiceSelect(false);
+      localStorage.setItem("selectedService", JSON.stringify(selected));
+
+      // refresh related data
+      const resAddons = await axios.get(`${backendBase}/api/service-addons/by-service/${selected.id}`);
+      setAddons(resAddons.data || []);
+      const resEmps = await axios.get(`${backendBase}/api/employees/by-service/${selected.id}`);
+      setEmployees(resEmps.data || []);
+      await loadSlots(date, "any", selected.id);
+    } catch (err) {
+      console.error("❌ Błąd przy zmianie usługi:", err);
+    }
+  };
+
+  const confirmBooking = async () => {
+    if (!selectedSlot || !service) return;
+    try {
+      const token = firebaseUser ? await firebaseUser.getIdToken() : null;
+      await axios.post(
+        `${backendBase}/api/appointments`,
+        {
+          employee_id: selectedSlot.employee_id,
+          service_id: service.id,
+          date: formatIsoDate(date),
+          start_time: selectedSlot.start_time,
+          end_time: computedEndTime || selectedSlot.end_time,
+          addons: selectedAddons.map((a) => a.id),
+        },
+        token ? { headers: { Authorization: `Bearer ${token}` } } : {}
+      );
+      setMsg("✅ Rezerwacja potwierdzona!");
+    } catch (err) {
+      console.error("❌ Błąd rezerwacji:", err);
+      setMsg(err.response?.data?.error || "❌ Nie udało się zarezerwować terminu");
+    }
+  };
+
+  // calendar helpers
+  const weekdays = ["PON.", "WT.", "ŚR.", "CZW.", "PT.", "SOB.", "NIED."];
+  const buildMonthGrid = useCallback((d) => {
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const startOffset = (first.getDay() + 6) % 7;
+    const totalCells = startOffset + last.getDate();
+    const rows = Math.ceil(totalCells / 7);
+    const cells = [];
+    let current = new Date(first);
+    current.setDate(first.getDate() - startOffset);
+    for (let r = 0; r < rows; r++) {
+      const row = [];
+      for (let c = 0; c < 7; c++) {
+        row.push(new Date(current));
+        current.setDate(current.getDate() + 1);
+      }
+      cells.push(row);
+    }
+    return cells;
+  }, []);
+
+  const prevMonth = () => setMonthDate((m) => { const n = new Date(m); n.setMonth(n.getMonth() - 1); return n; });
+  const nextMonth = () => setMonthDate((m) => { const n = new Date(m); n.setMonth(n.getMonth() + 1); return n; });
+
+  // totals
+  const totalPrice = useMemo(() => Number(service?.price || 0) + selectedAddons.reduce((s, a) => s + Number(a.price || 0), 0), [service, selectedAddons]);
+  const totalDuration = useMemo(() => Number(service?.duration_minutes || 0) + selectedAddons.reduce((s, a) => s + Number(a.duration_minutes || 0), 0), [service, selectedAddons]);
+
+  if (!pageReady && !isRestoringRebook) {
+    return <div className={`${pageBgClass} min-h-screen flex items-center justify-center`}>Ładowanie...</div>;
+  }
+
+  return (
+    <div className={`${pageBgClass} min-h-screen font-inter p-[10px] sm:p-[clamp(5px,4vw,10px)]`}>
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-3">
+        <button
+          onPointerDown={() => { localStorage.removeItem("lockEmployeeSelection"); navigate("/services"); }}
+          aria-label="Powrót"
+          className={`bg-transparent border-0 text-[22px] cursor-pointer p-1 transition-transform duration-100 ${isDark ? "text-white" : "text-gray-900"}`}
+        >
+          ←
+        </button>
+        <h1 className="m-0 text-[22px] font-semibold">Umów wizytę</h1>
+        <button onClick={() => setTheme(isDark ? "light" : "dark")} className={`ml-auto bg-transparent rounded-md px-2 py-1 text-sm border ${borderClass} ${isDark ? "text-white" : "text-gray-900"} cursor-pointer`}>
+          {isDark ? "☀️ Jasny" : "🌙 Ciemny"}
+        </button>
+      </div>
+
+      {/* Top scrollable content */}
+      <div className="pb-2">
+        {!lockEmployeeSelection && (
+          <div className="flex gap-3 overflow-x-auto pb-2 mb-3">
+            <div onPointerDown={() => { setSelectedEmployee("any"); setSelectedSlot(null); }} className="min-w-[72px] text-center cursor-pointer">
+              <div className={`w-16 h-16 rounded-full mx-auto mb-2 relative flex items-center justify-center`} style={{ background: isDark ? "#171717" : "#f2f2f2", border: selectedEmployee === "any" ? `3px solid ${PRIMARY}` : `3px solid ${isDark ? "#171717" : "#f2f2f2"}` }}>
+                <div className="text-[26px]">👤</div>
+              </div>
+              <div className={`text-[12px] ${selectedEmployee === "any" ? "" : subtextClass}`} style={{ color: selectedEmployee === "any" ? PRIMARY : undefined }}>Dowolna</div>
+            </div>
+
+            {employees.map((emp) => {
+              const selected = selectedEmployee === emp.id;
+              return (
+                <div key={emp.id} className="min-w-[88px] text-center cursor-pointer" onPointerDown={() => { setSelectedEmployee(emp.id); setSelectedSlot(null); }}>
+                  <div className="relative mx-auto mb-2 w-16 h-16">
+                    <div className="absolute inset-0 rounded-full p-[3px] box-border flex items-center justify-center" style={{ background: `linear-gradient(180deg, ${PRIMARY}, ${PRIMARY})`, opacity: selected ? 1 : 0.14 }}>
+                      <div className={`w-full h-full rounded-full overflow-hidden flex items-center justify-center`} style={{ background: isDark ? "#111" : "#fff" }}>
+                        {emp.image_url ? <img src={`${backendBase}/uploads/${emp.image_url}`} alt={emp.name} className="w-full h-full object-cover" /> : <div className={`${isDark ? "text-white" : "text-gray-900"} text-lg`}>{emp.name ? emp.name[0].toUpperCase() : "?"}</div>}
+                      </div>
+                    </div>
+                    {selected && (
+                      <div className="absolute -right-1 -bottom-1 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: PRIMARY, boxShadow: `0 2px 6px ${PRIMARY}66` }}>
+                        <Check size={12} color="#fff" />
+                      </div>
+                    )}
+                  </div>
+                  <div className={`text-[12px] ${selected ? "" : subtextClass} truncate`} style={{ color: selected ? PRIMARY : undefined }}>{emp.name}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* calendar header */}
+        <div className="flex justify-between items-center mb-2">
+          <div className="flex items-center gap-2">
+            <button onClick={prevMonth} className={`bg-transparent border-0 p-1 ${isDark ? "text-white" : "text-gray-900"} cursor-pointer`} aria-label="Poprzedni miesiąc"><ChevronLeft size={18} /></button>
+            <div className="text-base font-semibold">{monthDate.toLocaleDateString("pl-PL", { month: "long", year: "numeric" })}</div>
+            <button onClick={nextMonth} className={`bg-transparent border-0 p-1 ${isDark ? "text-white" : "text-gray-900"} cursor-pointer`} aria-label="Następny miesiąc"><ChevronRight size={18} /></button>
+          </div>
+          <div className={`text-sm ${subtextClass}`}>Wybierz datę</div>
+        </div>
+
+        {/* weekdays */}
+        <div className="grid grid-cols-7 gap-2 mb-1">{weekdays.map((w) => <div key={w} className={`text-center text-sm ${subtextClass}`}>{w}</div>)}</div>
+
+        {/* calendar grid */}
+        <div className="rounded-lg p-3 mb-3 bg-transparent shadow-none">
+          <div className="grid grid-cols-7 gap-2 justify-items-center" style={{ transform: window.innerWidth < 480 ? "scale(0.95)" : undefined }}>
+            {buildMonthGrid(monthDate).flat().map((cellDate, idx) => {
+  const isCurrentMonth = cellDate.getMonth() === monthDate.getMonth();
+  const isSelected = cellDate.toDateString() === date.toDateString();
+  const iso = formatIsoDate(cellDate);
+  const isAvailable = availableDays.includes(iso);
+
+  // 🔒 Zablokuj dni przeszłe
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isPast = cellDate < today;
+
+  const isClickable = isAvailable && !isPast;
+
+  return (
+    <button
+      key={idx}
+      onPointerDown={() => {
+        if (!isClickable) return;
+        setDate(new Date(cellDate));
+        setMonthDate(new Date(cellDate.getFullYear(), cellDate.getMonth(), 1));
+      }}
+      disabled={!isClickable}
+      className={`w-11 h-11 rounded-full flex items-center justify-center m-[2px] transition-all duration-100 ${
+        isClickable ? "cursor-pointer" : "opacity-25 cursor-not-allowed"
+      }`}
+      style={{
+        background: isSelected ? PRIMARY : "transparent",
+        color: isSelected
+          ? "#fff"
+          : isCurrentMonth
+          ? isDark
+            ? "#d2d2d2"
+            : "#111827"
+          : isDark
+          ? "#666"
+          : "#aaa",
+        border: "none",
+      }}
+    >
+      <div className="text-sm pointer-events-none">{cellDate.getDate()}</div>
+    </button>
+  );
+})}
+
+          </div>
+        </div>
+
+        {/* slots */}
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm">Wybierz godzinę</h3>
+          {loadingSlots ? (<div className={`${subtextClass}`}>Ładowanie terminów…</div>) : slots.length ? (
+            <div className="flex gap-2 overflow-x-auto pb-2 hide-scrollbar">
+              {slots.map((s, i) => {
+                const empColor = PRIMARY;
+                const isSelected = selectedSlot && selectedSlot.employee_id === s.employee_id && selectedSlot.start_time === s.start_time;
+                return (
+                  <div key={i} className="flex-shrink-0">
+                    <button onPointerDown={() => handleSlotClick(s)} onTouchStart={(e) => e.stopPropagation()} className={`flex flex-col items-center justify-center py-2 px-3 rounded-[22px] min-w-[76px] min-h-[54px] text-center transition-transform duration-100`} style={{ background: isSelected ? empColor : (isDark ? "#0f0f10" : "#ffffff"), color: isSelected ? "#fff" : (isDark ? "#fff" : "#111827"), border: isSelected ? `2px solid ${empColor}` : `1px solid ${isDark ? "#3d3c3c" : "#e5e7eb"}`, boxShadow: isSelected ? `0 6px 18px ${empColor}33` : "none", touchAction: "manipulation" }}>
+                      <div className="text-sm font-extrabold leading-none mb-0.5 select-none pointer-events-none">{s.start_time}</div>
+                      <div className={`text-xs leading-none pointer-events-none ${isSelected ? "" : subtextClass}`}>{shortName(s.employee_name)}</div>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (<div className={`${subtextClass}`}>{msg || "Brak dostępnych terminów"}</div>)}
+        </div>
+      </div>
+
+      {/* bottom summary */}
+      <div className={`rounded-xl ${isDark ? "bg-gray-800" : "bg-white"} p-4 mt-2 mb-7 max-w-[1100px] mx-auto border ${borderClass}`}>
+        <div className="flex justify-between items-center gap-3">
+          <div className="min-w-0">
+            <div className="text-base font-semibold truncate">{service?.name || "—"}
+              <div className="mt-1">
+                <button onClick={() => setShowServiceSelect(!showServiceSelect)} className={`text-xs underline ${isDark ? "text-gray-400 hover:text-gray-200" : "text-gray-600 hover:text-gray-800"}`}>Zmień usługę</button>
+              </div>
+              {showServiceSelect && (
+                <div className={`mt-2 border rounded-lg p-2 ${isDark ? "bg-gray-900 border-gray-700" : "bg-gray-50 border-gray-300"}`}>
+                  {availableServices.length === 0 ? (<div className={`text-sm ${subtextClass}`}>Brak innych usług</div>) : (
+                  <select
+  onChange={(e) => handleChangeService(e.target.value)}
+  value={service?.id || ""}
+  className={`w-full p-2 rounded-md text-sm ${isDark ? "bg-gray-800 text-white" : "bg-white text-gray-900"}`}
+>
+  <option value="">Wybierz usługę</option>
+
+  {availableServices
+    // 🔽 Pokazuj tylko usługi przypisane do aktualnie dostępnych pracowników
+    .filter((svc) => {
+      if (!employees || employees.length === 0) return true;
+      const currentEmpIds = employees.map((e) => e.id);
+      // 🔥 sprawdzamy tablicę employee_ids (może być pusta lub undefined)
+      return (
+        !svc.employee_ids?.length ||
+        svc.employee_ids.some((id) => currentEmpIds.includes(id))
+      );
+    })
+    .map((s) => (
+      <option key={s.id} value={s.id}>
+        {s.name} — {formatPrice(s.price)} zł
+      </option>
+    ))}
+</select>
+
+
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={`mt-1 text-sm ${subtextClass}`}>{selectedSlot ? (selectedSlot.employee_name?.split(" ")[0] || selectedSlot.employee_name) : selectedEmployee === "any" ? "Dowolna osoba" : (employees.find(e => e.id === selectedEmployee)?.name?.split(" ")[0] || "—")}</div>
+
+            <div className="mt-3">
+              <button onPointerDown={() => setAddonsOpen(!addonsOpen)} onTouchStart={(e) => e.stopPropagation()} className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm border ${borderClass} ${isDark ? "bg-gray-800" : "bg-white"} ${isDark ? "text-white" : "text-gray-900"} cursor-pointer`}><Plus size={14} /><span className="pointer-events-none">Dodatki{selectedAddons.length ? ` (${selectedAddons.length})` : ""}</span></button>
+              {addonsOpen && (
+                <div className={`mt-2 p-2 rounded-md ${isDark ? "bg-gray-900 border-gray-800" : "bg-gray-50 border-gray-200"} border max-w-[520px]`}>
+                  {addons.length === 0 ? (<div className={`${subtextClass}`}>Brak dodatków</div>) : (
+                    <div className="grid gap-2">{addons.map((a) => {
+                      const selected = selectedAddons.some((x) => x.id === a.id);
+                      return (
+                        <div key={a.id} onPointerDown={() => toggleAddon(a)} className={`flex justify-between items-center p-2 rounded-md cursor-pointer ${selected ? (isDark ? "bg-[#2b1a0f]" : "bg-[rgba(229,123,44,0.08)]") : (isDark ? "bg-gray-800" : "bg-white")}`}>
+                          <div>
+                            <div className={`text-sm ${isDark ? "text-white" : "text-gray-900"}`}>{a.name}</div>
+                            <div className={`text-xs ${subtextClass}`}>+{formatPrice(a.price)} zł • +{a.duration_minutes} min</div>
+                          </div>
+                          <div>{selected ? <Check size={18} color={PRIMARY} /> : <div style={{ width: 18, height: 18 }} />}</div>
+                        </div>
+                      );
+                    })}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="text-right min-w-[120px]">
+            <div className="text-lg font-extrabold">{formatPrice(totalPrice)} zł</div>
+            <div className={`mt-1 text-sm ${subtextClass}`}>{selectedSlot ? `${selectedSlot.start_time} – ${computedEndTime || selectedSlot.end_time}` : `${totalDuration} min`}</div>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <button onClick={() => { if (!selectedSlot) return; setShowSummaryModal(true); }} disabled={!selectedSlot} className={`w-full rounded-md py-3 text-base font-semibold ${selectedSlot ? "" : "opacity-60 cursor-not-allowed"}`} style={{ background: selectedSlot ? PRIMARY : (isDark ? "#333" : "#cbd5e1"), color: "#fff", border: "none" }}>Dalej</button>
+        </div>
+      </div>
+
+      {/* confirmation modal */}
+      {showSummaryModal && (
+        <div className={`fixed inset-0 z-[9999] flex items-center justify-center p-6 ${modalBg}`}>
+          {msg.includes("✅") ? (
+            <div className={`w-full max-w-[480px] text-center p-8 rounded-2xl ${isDark ? "bg-gray-800" : "bg-white"} shadow-lg`}>
+              <h2 className="text-[26px] font-bold" style={{ color: PRIMARY }}>🎉 Gratulacje!</h2>
+              <p className={`mt-4 text-base ${subtextClass}`}>Twoja wizyta została umówiona na <strong>{prettyDate(date)}, godz. {selectedSlot?.start_time}</strong>.</p>
+              <p className={`mt-2 text-sm ${subtextClass}`}>Dziękujemy za skorzystanie z naszych usług!</p>
+              <button onPointerDown={() => { setMsg(""); setShowSummaryModal(false); window.location.href = "/salons"; }} onTouchStart={(e) => e.stopPropagation()} className="mt-6 w-full py-3 rounded-md font-semibold" style={{ background: PRIMARY, color: "#fff" }}>Zamknij</button>
+            </div>
+          ) : (
+            <div className={`w-full max-w-[480px] p-6 rounded-2xl ${isDark ? "bg-gray-800" : "bg-white"} shadow-lg`}>
+              <div className="flex items-center mb-4">
+                <button onPointerDown={() => setShowSummaryModal(false)} className={`mr-3 p-1 ${isDark ? "text-white" : "text-gray-900"}`}>←</button>
+                <h2 className="text-xl font-bold m-0">Sprawdź i potwierdź</h2>
+              </div>
+              <div className={`text-sm ${subtextClass} mb-2`}>{prettyDate(date)} · {selectedSlot?.start_time}</div>
+
+              {/* Salon info */}
+              {(() => {
+                try {
+                  const salon = JSON.parse(localStorage.getItem("selectedSalon"));
+                  if (salon) return <div className={`text-sm ${subtextClass} mb-4`}>{salon.name} · {salon.street} {salon.street_number}, {salon.city}</div>;
+                } catch {}
+                return null;
+              })()}
+
+              <div className={`p-4 rounded-lg mb-4 border ${borderClass} ${isDark ? "bg-gray-800" : "bg-white"}`}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="text-base font-semibold">{service?.name || "Usługa"}</div>
+                    <div className={`text-sm mt-1 ${subtextClass}`}>Pracownik: {selectedSlot ? (selectedSlot.employee_name?.split(" ")[0] || selectedSlot.employee_name) : selectedEmployee === "any" ? "Dowolna osoba" : (employees.find((e) => e.id === selectedEmployee)?.name?.split(" ")[0] || "—")}</div>
+                    {selectedAddons.length > 0 && (
+                      <div className="mt-3">
+                        <div className={`text-sm ${subtextClass} mb-1`}>Dodatki:</div>
+                        <ul className="list-disc pl-5 text-sm" style={{ color: isDark ? "#fff" : "#111827" }}>{selectedAddons.map((a) => <li key={a.id} className="mb-1">{a.name} (+{formatPrice(a.price)} zł, +{a.duration_minutes} min)</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-base font-semibold">{formatPrice(totalPrice)} zł</div>
+                    <div className={`text-sm mt-1 ${subtextClass}`}>{selectedSlot?.start_time} – {computedEndTime}</div>
+                  </div>
+                </div>
+
+                <hr className={`my-3 border-t ${borderClass}`} />
+                <div className="flex justify-between text-base"><span>Suma</span><strong>{formatPrice(totalPrice)} zł</strong></div>
+              </div>
+
+              <div className="text-center mb-4"><div className={`text-sm ${subtextClass}`}>Do zapłaty na miejscu: <strong className={`${isDark ? "text-white" : "text-gray-900"}`}>{formatPrice(totalPrice)} zł</strong></div></div>
+
+              <button onClick={confirmBooking} className="w-full py-3 rounded-md font-semibold" style={{ background: PRIMARY, color: "#fff" }}>Potwierdź i umów</button>
+
+              {msg && !msg.includes("✅") && (<div className="mt-4 rounded-md p-2 text-center" style={{ background: successBg, color: isDark ? "#ff7676" : "#9b1f1f" }}>{msg}</div>)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {msg && (<div className="fixed left-5 bottom-24 rounded-md px-3 py-2" style={{ background: successBg, color: isDark ? "#fff" : "#111827" }}>{msg}</div>)}
+    </div>
+  );
+}

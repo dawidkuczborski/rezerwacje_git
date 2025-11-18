@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- ✅ iOS PWA fullscreen -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+	<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+/>
+
+    <meta name="apple-mobile-web-app-title" content="Elegant Barber" />
+
+    <!-- ✅ Android + Safari kolor status bara -->
+    <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
+
+    <!-- ✅ Manifest + ikony -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="apple-touch-icon" href="/vite.svg" />
+
+    <title>Elegant Barber</title>
+
+    <!-- ✅ Instant theme loader -->
+    <script>
+  (function () {
+    try {
+      const theme = localStorage.getItem("theme") || "dark";
+      const dark = theme === "dark";
+
+      // 🎨 Wartości jak w React (dynamiczne kolory)
+      const bg = dark ? "#0f0f10" : "#f9fafb";
+      const color = dark ? "#ffffff" : "#111827";
+
+      // ⏱️ Ustaw natychmiast tło i kolor
+      document.documentElement.style.background = bg;
+      document.documentElement.style.color = color;
+
+      // ✅ Synchronizacja z <body> po załadowaniu DOM
+      document.addEventListener("DOMContentLoaded", () => {
+        document.body.style.background = bg;
+        document.body.style.color = color;
+        document.documentElement.classList.toggle("dark", dark);
+
+        // Ustaw dynamicznie kolor status bara
+        const meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", bg);
+      });
+
+      // ✅ Reaguj na zmianę motywu w czasie działania (np. React zmienia localStorage)
+      window.addEventListener("storage", (e) => {
+        if (e.key === "theme") {
+          const newTheme = e.newValue || "dark";
+          const isDark = newTheme === "dark";
+          const newBg = isDark ? "#0f0f10" : "#f9fafb";
+          const newColor = isDark ? "#ffffff" : "#111827";
+
+          document.documentElement.style.background = newBg;
+          document.documentElement.style.color = newColor;
+          document.body.style.background = newBg;
+          document.body.style.color = newColor;
+
+          document.documentElement.classList.toggle("dark", isDark);
+
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", newBg);
+        }
+      });
+    } catch {
+      document.documentElement.style.background = "#111827";
+      document.documentElement.style.color = "#ffffff";
+    }
+  })();
+</script>
+
+
+    <!-- ✅ Styl: pełne tło + brak przewijania + obsługa safe area -->
+    <style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    min-height: 100vh;
+    overflow: inherit;
+    background: inherit;
+    color: inherit;
+  }
+
+  .safe-top {
+    height: env(safe-area-inset-top);
+    min-height: constant(safe-area-inset-top);
+    background: inherit;
+    width: 100%;
+  }
+
+ 
+  @supports not (padding-top: env(safe-area-inset-top)) {
+    .safe-top { height: 20px; }
+    #root { padding-top: 36px; }
+  }
+</style>
+  </head>
+
+  <body>
+    <div class="safe-top"></div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

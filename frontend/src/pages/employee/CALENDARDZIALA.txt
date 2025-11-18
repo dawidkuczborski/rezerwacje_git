@@ -1,0 +1,295 @@
+import React, { useEffect, useState, useCallback } from "react";
+import FullCalendar from "@fullcalendar/react";
+import timeGridPlugin from "@fullcalendar/timegrid";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import interactionPlugin from "@fullcalendar/interaction";
+import plLocale from "@fullcalendar/core/locales/pl";
+import axios from "axios";
+import { useAuth } from "../../components/AuthProvider";
+
+// 🎨 Styl FullCalendar
+const calendarStyles = `
+  .fc {
+    font-family: 'Inter', sans-serif;
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+  .fc .fc-toolbar.fc-header-toolbar {
+    padding: 0.75rem 1rem;
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+    color: white;
+    border-radius: 1rem 1rem 0 0;
+  }
+  .fc .fc-toolbar-title {
+    font-weight: 600;
+    font-size: 1.25rem;
+  }
+  .fc .fc-button {
+    background-color: rgba(255,255,255,0.15);
+    border: none;
+    color: white;
+    transition: 0.2s;
+  }
+  .fc .fc-button:hover {
+    background-color: rgba(255,255,255,0.3);
+  }
+  .fc-theme-standard td, 
+  .fc-theme-standard th {
+    border-color: rgba(0,0,0,0.1);
+  }
+  .dark .fc-theme-standard td,
+  .dark .fc-theme-standard th {
+    border-color: rgba(255,255,255,0.1);
+  }
+  .fc-daygrid-day-number {
+    font-size: 0.85rem;
+    opacity: 0.8;
+  }
+  .fc-event {
+    border-radius: 0.5rem;
+    border: none !important;
+    font-size: 0.9rem;
+    padding: 0.25rem 0.5rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+  }
+  .fc-event:hover {
+    opacity: 0.9;
+    transform: scale(1.01);
+    transition: all 0.15s ease-in-out;
+  }
+`;
+
+export default function EmployeeCalendar() {
+  const backendBase = import.meta.env.VITE_API_URL;
+  const { firebaseUser } = useAuth();
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+  const [zoom, setZoom] = useState(false);
+  const [draggedEventPrevTime, setDraggedEventPrevTime] = useState(null);
+
+  const isDark = theme === "dark";
+
+  const serviceColors = {
+    Combo: "#E57B2C",
+    Broda: "#10B981",
+    "Make Combo": "#3B82F6",
+    "Małe Combo": "#8B5CF6",
+    Strzyżenie: "#F59E0B",
+    default: "#9CA3AF",
+  };
+
+  // 🟢 Pobranie wizyt pracownika
+  const fetchAppointments = useCallback(async () => {
+    try {
+      setLoading(true);
+      if (!firebaseUser) return;
+
+      const token = await firebaseUser.getIdToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await axios.get(`${backendBase}/api/appointments/employee`, { headers });
+
+      const formatted = (res.data || []).map((r) => {
+        const [sh, sm] = r.start_time.split(":").map(Number);
+        const [eh, em] = r.end_time.split(":").map(Number);
+
+        const start = new Date(r.date);
+        start.setHours(sh, sm, 0, 0);
+
+        const end = new Date(r.date);
+        end.setHours(eh, em, 0, 0);
+
+        const color = serviceColors[r.service_name] || serviceColors.default;
+
+        return {
+          id: r.id,
+          title: `${r.client_name || "Klient"} — ${r.service_name || "Usługa"}`,
+          start,
+          end,
+          backgroundColor: color,
+          borderColor: color,
+          editable: true,
+          durationEditable: true,
+          extendedProps: {
+            service_name: r.service_name,
+            hasAddons: r.has_addons || false,
+          },
+        };
+      });
+
+      setEvents(formatted);
+    } catch (err) {
+      console.error("❌ Błąd pobierania rezerwacji:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [backendBase, firebaseUser]);
+
+  // 🧮 Formatuje datę w lokalnym formacie ISO (YYYY-MM-DD)
+  const formatLocalDate = (dateObj) => dateObj.toLocaleDateString("sv-SE");
+
+  // 🟢 Obsługa przesuwania wizyty
+  const handleEventDrop = async (info) => {
+    const event = info.event;
+    const { id, start, end, extendedProps } = event;
+
+    try {
+      const normalize = (d) =>
+        new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), 0, 0);
+
+      const newStart = normalize(start);
+      const newEnd = normalize(end);
+
+      // 🔹 Pobierz aktualne eventy z kalendarza (nie z state)
+      const calendarEvents = info.view.calendar.getEvents();
+
+      // 🔹 Sprawdź kolizję (bez samego eventu)
+      const overlapping = calendarEvents.filter((e) => {
+        if (e.id === id) return false;
+        const eStart = normalize(e.start);
+        const eEnd = normalize(e.end);
+        return newStart < eEnd && newEnd > eStart;
+      });
+
+      console.log("🔍 Kolizje znalezione:", overlapping);
+
+      let force = false;
+
+      if (overlapping.length > 0) {
+        const overlap = overlapping[0];
+        const overlapStart = Math.max(normalize(overlap.start).getTime(), newStart.getTime());
+        const overlapEnd = Math.min(normalize(overlap.end).getTime(), newEnd.getTime());
+        const overlapMinutes = Math.max(0, Math.round((overlapEnd - overlapStart) / 60000));
+
+        const confirmOverlap = window.confirm(
+          `⚠️ W tym terminie masz inną wizytę!\n\n` +
+            `🟦 Twoja wizyta:\n${start.toLocaleString("pl-PL")} - ${end.toLocaleString("pl-PL")}\n\n` +
+            `🟪 Kolidująca wizyta:\n${overlap.title}\n${overlap.start.toLocaleString("pl-PL")} - ${overlap.end.toLocaleString("pl-PL")}\n\n` +
+            `⏱️ Czas nakładania: ${overlapMinutes} minut\n\n` +
+            `Czy chcesz mimo to przesunąć wizytę?`
+        );
+
+        if (!confirmOverlap) {
+          info.revert();
+          return;
+        }
+
+        // ✅ jeśli użytkownik potwierdził – wymuś zapis mimo kolizji
+        force = true;
+      }
+
+      const token = await firebaseUser.getIdToken();
+      const headers = { Authorization: `Bearer ${token}` };
+
+      const payload = {
+        date: newStart.toISOString().slice(0, 10),
+        start_time: start.toTimeString().slice(0, 5),
+        end_time: end.toTimeString().slice(0, 5),
+        force, // 🔹 przekazujemy do backendu
+      };
+
+      if (extendedProps.hasAddons) payload.syncAddons = true;
+
+      await axios.put(`${backendBase}/api/appointments/employee/${id}`, payload, { headers });
+
+      // 🎨 Zielone podświetlenie po udanym zapisie
+      event.setProp("backgroundColor", "#22c55e");
+      setTimeout(() => {
+        const baseColor = serviceColors[extendedProps.service_name] || serviceColors.default;
+        event.setProp("backgroundColor", baseColor);
+      }, 1000);
+    } catch (err) {
+      console.error("❌ Błąd zapisu zmiany terminu:", err);
+
+      // 🔴 Jeśli backend zwrócił 409, to znaczy, że kolizja była i nie wymuszono
+      if (err.response?.status === 409) {
+        alert("⚠️ Ten termin koliduje z inną wizytą i nie został zapisany.");
+      } else {
+        alert("❌ Nie udało się zapisać zmiany terminu. Spróbuj ponownie.");
+      }
+
+      info.revert();
+    }
+  };
+
+  useEffect(() => {
+    fetchAppointments();
+  }, [fetchAppointments]);
+
+  return (
+    <div
+      className={`p-4 min-h-screen ${
+        isDark ? "dark bg-gray-900 text-white" : "bg-gray-100 text-gray-900"
+      }`}
+    >
+      <style>{calendarStyles}</style>
+
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-semibold flex items-center gap-2">📅 Mój kalendarz</h2>
+        <button
+          onClick={() => setZoom(!zoom)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition"
+        >
+          {zoom ? "🔎 Oddal (5 min)" : "🔍 Przybliż (1 min)"}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-20 text-gray-400">Ładowanie rezerwacji...</div>
+      ) : (
+        <div className="rounded-2xl shadow-lg overflow-hidden bg-white dark:bg-gray-800">
+          <FullCalendar
+            key={events.length + (zoom ? "-zoom" : "-normal")}
+            plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
+            locale={plLocale}
+            slotLabelFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
+            initialView="timeGridWeek"
+            editable={true}
+            selectable={true}
+            eventStartEditable={true}
+            eventDurationEditable={true}
+            eventOverlap={true}
+            longPressDelay={0}
+            eventLongPressDelay={0}
+            dragScroll={true}
+            events={events}
+            eventDragStart={(info) => {
+              const e = info.event;
+              setDraggedEventPrevTime({
+                id: e.id,
+                start: new Date(e.start),
+                end: new Date(e.end),
+              });
+            }}
+            eventDrop={handleEventDrop}
+            eventResize={handleEventDrop}
+            slotMinTime="07:00:00"
+            slotMaxTime="23:00:00"
+            slotDuration={zoom ? "00:01:00" : "00:05:00"}
+            snapDuration={zoom ? "00:01:00" : "00:05:00"}
+            allDaySlot={false}
+            nowIndicator={true}
+            height="calc(100vh - 160px)"
+            aspectRatio={1.4}
+            headerToolbar={{
+              left: "prev,next today",
+              center: "title",
+              right: "dayGridMonth,timeGridWeek,timeGridDay",
+            }}
+            views={{
+              dayGridMonth: { editable: false },
+              timeGridWeek: { editable: true },
+              timeGridDay: { editable: true },
+            }}
+            eventClick={(info) => {
+              const { title, start, end } = info.event;
+              alert(
+                `🧾 ${title}\n${start.toLocaleString("pl-PL")} - ${end.toLocaleString("pl-PL")}`
+              );
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
