@@ -31,6 +31,6 @@ COPY --from=frontend /app/frontend/dist ./public
 # Install production server
 RUN npm install -g pm2
 
-EXPOSE 3000
+EXPOSE 5000
 
 CMD ["pm2-runtime", "server.js"]
