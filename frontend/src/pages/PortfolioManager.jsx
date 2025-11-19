@@ -5,7 +5,7 @@ import { Plus, Trash2, Upload, X, Image as ImageIcon } from "lucide-react";
 
 export default function PortfolioManager() {
   const { firebaseUser } = useAuth();
-  const backendBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const backendBase = import.meta.env.VITE_API_URL;
 
   const [salons, setSalons] = useState([]);
   const [selectedSalon, setSelectedSalon] = useState(null);

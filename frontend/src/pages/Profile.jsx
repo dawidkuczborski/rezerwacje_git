@@ -19,7 +19,7 @@ export default function Profile() {
   const [loadingInfo, setLoadingInfo] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
-  const backendBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const backendBase = import.meta.env.VITE_API_URL;
 
   // 🔐 Pobieranie danych profilu
   useEffect(() => {
