@@ -18,7 +18,7 @@ export default function BottomNav() {
 
     // ⛔ Nie pokazuj na stronach logowania / rejestracji
     const hiddenRoutes = [
-        "/login-client",
+        "/login",
         "/login-admin",
         "/login-employee",
         "/register-client",
