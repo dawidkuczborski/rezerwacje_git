@@ -11,7 +11,11 @@ import AppointmentModal from "../../components/AppointmentModal";
 import TimeOffModal from "../../components/TimeOffModal";
 import { useAuth } from "../../components/AuthProvider";
 
-const socket = io(import.meta.env.VITE_API_URL || "http://localhost:5000");
+const socket = io(import.meta.env.VITE_API_URL, {
+    autoConnect: false,
+});
+
+
 
 const weekDays = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Niedz"];
 
