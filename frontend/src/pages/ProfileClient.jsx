@@ -25,7 +25,7 @@ export default function ProfileClient() {
   const [info, setInfo] = useState(null);
   const [theme, setTheme] = useState("dark");
   const navigate = useNavigate();
-  const backendBase = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const backendBase = import.meta.env.VITE_API_URL;
 
   // 🌓 Motyw
   useEffect(() => {
