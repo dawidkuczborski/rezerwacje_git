@@ -4,7 +4,7 @@ import axios from "axios";
 
 export default function ScheduleManager() {
   const { firebaseUser } = useAuth();
-  const backendBase = "http://localhost:5000";
+  const backendBase = import.meta.env.VITE_API_URL;
 
   const [tab, setTab] = useState("hours"); // "hours" | "holidays" | "vacations"
   const [schedule, setSchedule] = useState([]);
