@@ -58,8 +58,15 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
             try {
                 const res = await axios.get(
                     `${backendBase}/api/appointments/details/new`,
-                    authHeaders()
+                    {
+                        ...authHeaders(),
+                        params: {
+                            salon_id: localStorage.getItem("selected_salon_id")
+                        }
+                    }
                 );
+
+
 
                 setClients(normalizeClients(res.data.clients || []));
                 setEmployees(res.data.employees || []);
@@ -88,8 +95,15 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
             const res = await axios.get(
                 `${backendBase}/api/appointments/employee/available`,
-                { params, ...authHeaders() }
+                {
+                    ...authHeaders(),
+                    params: {
+                        ...params,
+                        salon_id: localStorage.getItem("selected_salon_id")
+                    }
+                }
             );
+
 
             setAvailableTimes(
                 (res.data?.slots || []).map((s) => ({
@@ -128,8 +142,12 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
             const res = await axios.post(
                 `${backendBase}/api/clients/create-local`,
                 newClient,
-                authHeaders()
+                {
+                    ...authHeaders(),
+                    params: { salon_id: localStorage.getItem("selected_salon_id") }
+                }
             );
+
 
             const created = res.data?.client;
 
@@ -159,12 +177,13 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         try {
             await axios.post(
                 `${backendBase}/api/appointments/create-from-panel`,
+                { ...form, client_local_id: form.client_id },
                 {
-                    ...form,
-                    client_local_id: form.client_id,
-                },
-                authHeaders()
+                    ...authHeaders(),
+                    params: { salon_id: localStorage.getItem("selected_salon_id") }
+                }
             );
+
 
             setSavedPopup(true);
 

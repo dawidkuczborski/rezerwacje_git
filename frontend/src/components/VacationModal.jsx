@@ -31,15 +31,46 @@ export default function VacationModal({ open, onClose, onAdded }) {
 
                 const res = await axios.get(`${backendBase}/api/vacations/init`, {
                     headers: { Authorization: `Bearer ${token}` },
+                    params: {
+                        salon_id: localStorage.getItem("selected_salon_id"), // 🔥 TU DODANE
+                    }
                 });
 
+                console.log("Vacation init response:", res.data);
+
+                // PROVIDER
+                if (res.data.is_provider) {
+                    setIsProvider(true);
+
+                    // scal pracowników wszystkich salonów w jedną listę
+                    const merged = res.data.salons.flatMap((s) =>
+                        s.employees.map((e) => ({
+                            id: e.id,
+                            name: `${e.name} (${s.salon_name})`,
+                            salon_id: s.salon_id,
+                        }))
+                    );
+
+                    console.log("Provider employees merged:", merged);
+
+                    setEmployees(merged);
+
+                    if (merged.length > 0) {
+                        setVacation((v) => ({ ...v, employee_id: merged[0].id }));
+                    }
+
+                    return;
+                }
+
+                // EMPLOYEE
                 const list = res.data.employees || [];
                 setEmployees(list);
-                setIsProvider(res.data.is_provider);
+                setIsProvider(false);
 
-                if (!res.data.is_provider && list.length === 1) {
+                if (list.length === 1) {
                     setVacation((v) => ({ ...v, employee_id: list[0].id }));
                 }
+
             } catch (err) {
                 console.error("Vacation init error:", err);
             }
@@ -112,7 +143,7 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             )}
                         </AnimatePresence>
 
-                        {/* HEADER — identical style to AppointmentModal */}
+                        {/* HEADER */}
                         <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-400 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
                             <h2 className="text-lg font-semibold">Dodaj urlop</h2>
 
@@ -124,17 +155,17 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             </button>
                         </div>
 
-                        {/* CONTENT — same spacing & dividers */}
+                        {/* CONTENT */}
                         <div className="flex-1 p-6 space-y-6 text-gray-800 dark:text-gray-100">
 
-                            {/* EMPLOYEE */}
+                            {/* EMPLOYEE SELECT */}
                             <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
                                 <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
                                     <User size={14} /> Pracownik
                                 </label>
 
                                 <select
-                                    value={vacation.employee_id}
+                                    value={String(vacation.employee_id || "")}
                                     disabled={!isProvider}
                                     onChange={(e) =>
                                         setVacation((v) => ({
@@ -143,15 +174,18 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                         }))
                                     }
                                     className={`
-                    mt-1 w-full border rounded-lg p-2
-                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                    dark:bg-gray-800 dark:border-gray-700
-                    ${!isProvider ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-700" : ""}
-                  `}
+                                        mt-1 w-full border rounded-lg p-2
+                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                                        dark:bg-gray-800 dark:border-gray-700
+                                        ${!isProvider
+                                            ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-700"
+                                            : ""
+                                        }
+                                    `}
                                 >
                                     <option value="">Wybierz...</option>
                                     {employees.map((e) => (
-                                        <option key={e.id} value={e.id}>
+                                        <option key={e.id} value={String(e.id)}>
                                             {e.name}
                                         </option>
                                     ))}
@@ -171,10 +205,10 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                         setVacation((v) => ({ ...v, start_date: e.target.value }))
                                     }
                                     className="
-                    mt-1 w-full border rounded-lg p-2
-                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                    dark:bg-gray-800 dark:border-gray-700
-                  "
+                                        mt-1 w-full border rounded-lg p-2
+                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                                        dark:bg-gray-800 dark:border-gray-700
+                                    "
                                 />
                             </div>
 
@@ -191,10 +225,10 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                         setVacation((v) => ({ ...v, end_date: e.target.value }))
                                     }
                                     className="
-                    mt-1 w-full border rounded-lg p-2
-                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                    dark:bg-gray-800 dark:border-gray-700
-                  "
+                                        mt-1 w-full border rounded-lg p-2
+                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                                        dark:bg-gray-800 dark:border-gray-700
+                                    "
                                 />
                             </div>
 
@@ -211,25 +245,25 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     }
                                     placeholder="np. urlop wypoczynkowy"
                                     className="
-                    mt-1 w-full border rounded-lg p-2 h-24 resize-none
-                    focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                    dark:bg-gray-800 dark:border-gray-700
-                  "
+                                        mt-1 w-full border rounded-lg p-2 h-24 resize-none
+                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
+                                        dark:bg-gray-800 dark:border-gray-700
+                                    "
                                 />
                             </div>
                         </div>
 
-                        {/* FOOTER — same structure */}
+                        {/* FOOTER */}
                         <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 flex justify-end gap-3 px-6 py-4">
                             <button
                                 onClick={onClose}
                                 disabled={saving}
                                 className="
-                  px-4 py-2 rounded-lg
-                  bg-gray-200 hover:bg-gray-300
-                  dark:bg-gray-700 dark:hover:bg-gray-600
-                  disabled:opacity-50
-                "
+                                    px-4 py-2 rounded-lg
+                                    bg-gray-200 hover:bg-gray-300
+                                    dark:bg-gray-700 dark:hover:bg-gray-600
+                                    disabled:opacity-50
+                                "
                             >
                                 Anuluj
                             </button>
@@ -238,11 +272,12 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                 onClick={handleSave}
                                 disabled={saving}
                                 className={`
-                  px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
-                  ${saving
+                                    px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
+                                    ${saving
                                         ? "bg-gray-400 cursor-not-allowed"
-                                        : "bg-orange-500 hover:bg-orange-600"}
-                `}
+                                        : "bg-orange-500 hover:bg-orange-600"
+                                    }
+                                `}
                             >
                                 {saving ? "Zapisywanie..." : (<><Save size={16} /> Zapisz</>)}
                             </button>

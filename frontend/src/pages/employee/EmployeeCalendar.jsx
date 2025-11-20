@@ -849,7 +849,10 @@ if (firebaseUser === null) {
         if (!token) return;
         const res = await axios.get(`${backendBase}/api/calendar/shared`, {
           headers: { Authorization: `Bearer ${token}` },
-          params: { date: formatDateLocal(activeDay) }
+            params: {
+                date: formatDateLocal(activeDay),
+                salon_id: localStorage.getItem("selected_salon_id")},
+            
         });
         const normalized = {
           ...res.data,
@@ -882,10 +885,15 @@ const refreshCalendar = useCallback(async () => {
     const token = await user.getIdToken();
     if (!token) return;
 
-    const res = await axios.get(`${backendBase}/api/calendar/shared`, {
-      headers: { Authorization: `Bearer ${token}` },
-      params: { date: formatDateLocal(activeDayRef.current), _t: Date.now() }
-    });
+      const res = await axios.get(`${backendBase}/api/calendar/shared`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+              date: formatDateLocal(activeDayRef.current),
+              salon_id: Number(localStorage.getItem("selected_salon_id")),
+              _t: Date.now()
+          },
+      });
+
 
     const normalized = {
       ...res.data,
@@ -1012,11 +1020,16 @@ useEffect(() => {
                 const token = await firebaseUser.getIdToken?.();
                 if (!token) return;
 
-                // ⬇️ UWAGA: zawsze bierzemy AKTUALNY dzień
+                const selectedSalonId = Number(localStorage.getItem("selected_salon_id"));
+
                 const res = await axios.get(`${backendBase}/api/calendar/shared`, {
                     headers: { Authorization: `Bearer ${token}` },
-                    params: { date: formatDateLocal(activeDayRef.current) }
+                    params: {
+                        date: formatDateLocal(activeDayRef.current),
+                        salon_id: selectedSalonId
+                    }
                 });
+
 
                 const normalized = {
                     ...res.data,
@@ -1373,7 +1386,8 @@ useEffect(() => {
       const token = await firebaseUser.getIdToken?.();
       const res = await axiosNoCache(`${backendBase}/api/calendar/shared`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { date: formatDateLocal(activeDay) }
+          params: { date: formatDateLocal(activeDay), salon_id: localStorage.getItem("selected_salon_id") },
+          
       });
       const normalized = {
         ...res.data,

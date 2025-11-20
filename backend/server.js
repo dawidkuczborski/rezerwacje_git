@@ -14,6 +14,9 @@ import { pathToRegexp } from "path-to-regexp";
 dotenv.config();
 const { Pool } = pkg;
 
+
+const loginLocks = new Map();
+
 // -------------------- Helpers / Small utilities --------------------
 const ensureDirSync = (dirPath) => {
     try {
@@ -432,6 +435,63 @@ function requireEmployeeOrProviderRole(req, res, next) {
 
     return res.status(403).json({ error: "Brak uprawnień" });
 }
+
+// -------------------- GLOBAL SALON ACCESS MIDDLEWARE --------------------
+app.use(async (req, res, next) => {
+    try {
+        const uid = req.user?.uid;
+
+        // brak zalogowania → skip
+        if (!uid) return next();
+
+        // sprawdzany salon w query/body/header
+        const requestedSalonId = Number(
+            req.query.salon_id ||
+            req.body.salon_id ||
+            req.headers["x-salon-id"]
+        );
+
+        // endpoint nie wymaga salonu → przepuść
+        if (!requestedSalonId) return next();
+
+        // salony providera
+        const providerSalonsRes = await pool.query(
+            `SELECT id FROM salons WHERE owner_uid = $1`,
+            [uid]
+        );
+        const providerSalonIds = providerSalonsRes.rows.map(s => s.id);
+
+        // salon pracownika
+        const empRes = await pool.query(
+            `SELECT salon_id FROM employees WHERE uid = $1`,
+            [uid]
+        );
+        const employeeSalonId = empRes.rows[0]?.salon_id ?? null;
+
+        const allowed = new Set([
+            ...providerSalonIds,
+            ...(employeeSalonId ? [employeeSalonId] : [])
+        ]);
+
+        if (!allowed.has(requestedSalonId)) {
+            return res.status(403).json({
+                error: "Brak dostępu do tego salonu",
+                forceLogout: true
+            });
+        }
+
+        req.salon_id = requestedSalonId;
+        next();
+
+    } catch (err) {
+        console.error("GLOBAL SALON CHECK ERROR:", err);
+        next();
+    }
+});
+
+
+
+
 // -------------------- Helper DB functions --------------------
 const getOwnerSalonId = async (ownerUid) => {
     if (!ownerUid) return null;
@@ -474,34 +534,66 @@ app.get(
     "/api/auth/me",
     verifyToken,
     asyncHandler(async (req, res) => {
-        if (!req.user?.uid) return res.status(401).json({ error: "Brak użytkownika" });
 
-        const existing = await pool.query("SELECT * FROM users WHERE uid = $1", [req.user.uid]);
-        if (existing.rows.length > 0) {
-            return res.json(existing.rows[0]);
+        console.log("🔹 /api/auth/me → START");
+        console.log("🔸 Authenticated UID:", req.user?.uid);
+
+        if (!req.user?.uid) {
+            return res.status(401).json({ error: "Brak użytkownika" });
         }
 
-        // fetch from firebase user if possible
-        if (!firebaseInitialized) {
-            return res.json({ uid: req.user.uid, email: req.user.email, name: req.user.name || "Użytkownik", role: "client" });
-        }
-
-        const fbUser = await admin.auth().getUser(req.user.uid);
-        const newUser = {
-            uid: fbUser.uid,
-            email: fbUser.email,
-            name: fbUser.displayName || "Użytkownik",
-            role: "client",
-        };
-
-        await pool.query(
-            "INSERT INTO users (uid, email, name, role) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-            [newUser.uid, newUser.email, newUser.name, newUser.role]
+        // 1️⃣ Pobieramy usera z bazy
+        const existing = await pool.query(
+            "SELECT * FROM users WHERE uid = $1",
+            [req.user.uid]
         );
 
-        res.json(newUser);
+        if (existing.rows.length === 0) {
+            return res.json({
+                uid: req.user.uid,
+                email: req.user.email,
+                role: "client",
+                is_provider: false
+            });
+        }
+
+        const userData = existing.rows[0];
+
+        console.log("🔹 Rola:", userData.role);
+        console.log("🔹 is_provider:", userData.is_provider);
+
+        // 2️⃣ Provider – pobierz wszystkie salony ownera
+        if (userData.is_provider === true) {
+            const salons = await pool.query(
+                "SELECT id, name FROM salons WHERE owner_uid = $1",
+                [userData.uid]
+            );
+
+            console.log("✔ Salony providera:", salons.rows);
+
+            userData.salons = salons.rows; // może być 0,1,n
+        }
+
+        // 3️⃣ Employee – pobierz jeden salon_id
+        if (userData.role === "employee") {
+            const employeeRow = await pool.query(
+                "SELECT salon_id FROM employees WHERE uid = $1",
+                [userData.uid]
+            );
+
+            if (employeeRow.rows.length > 0) {
+                userData.salon_id = employeeRow.rows[0].salon_id;
+                console.log("✔ Salon pracownika:", userData.salon_id);
+            }
+        }
+
+        console.log("🔚 /api/auth/me → END");
+        res.json(userData);
     })
 );
+
+
+
 // ✅ Update user profile
 app.put(
     "/api/auth/me",
@@ -1146,57 +1238,182 @@ app.get(
             const uid = req.user?.uid;
             if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-            // 🔹 Znajdź salon zalogowanego użytkownika
-            const empRes = await pool.query(
-                "SELECT salon_id FROM employees WHERE uid = $1 LIMIT 1",
+            // ----------------------------------------------------
+            // 1️⃣ Salon przekazany przez FRONTEND ma zawsze pierwszeństwo
+            // ----------------------------------------------------
+            let salonId = req.query.salon_id ? Number(req.query.salon_id) : null;
+
+            console.log("➡ salon_id z frontendu:", salonId);
+
+            // ----------------------------------------------------
+            // 2️⃣ Jeśli frontend NIE podał salonu → sprawdzamy jako pracownik
+            // ----------------------------------------------------
+            if (!salonId) {
+                const empRes = await pool.query(
+                    "SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1",
+                    [uid]
+                );
+
+                if (empRes.rows.length > 0) {
+                    salonId = empRes.rows[0].salon_id;
+                    console.log("➡ salon_id z konta PRACOWNIKA:", salonId);
+                }
+            }
+
+            // ----------------------------------------------------
+            // 3️⃣ Jeśli nadal brak → sprawdzamy czy provider
+            // ----------------------------------------------------
+            if (!salonId) {
+                const userRes = await pool.query(
+                    "SELECT is_provider FROM users WHERE uid=$1 LIMIT 1",
+                    [uid]
+                );
+
+                const isProvider = userRes.rows[0]?.is_provider === true;
+
+                if (isProvider) {
+                    return res.status(400).json({
+                        error: "Provider musi wybrać salon (brak salon_id)"
+                    });
+                }
+            }
+
+            // ----------------------------------------------------
+            // 4️⃣ Jeśli nadal brak salonu → koniec
+            // ----------------------------------------------------
+            if (!salonId) {
+                return res.status(403).json({
+                    error: "Brak przypisanego salonu."
+                });
+            }
+
+            console.log("✔ Finalnie używamy salon_id:", salonId);
+
+            
+            // ----------------------------------------------------
+            // ⛔️ BLOKADA LOGOWANIA (employee / provider)
+            // ----------------------------------------------------
+            const lockExpiration = loginLocks.get(uid);
+            if (lockExpiration && lockExpiration > Date.now()) {
+                return res.status(403).json({
+                    error: "Dostęp zablokowany na 5 minut.",
+                    lockedUntil: lockExpiration
+                });
+            }
+
+            // ----------------------------------------------------
+            // 🔐 PRIORYTET RÓL — employee > provider
+            // ----------------------------------------------------
+            const empRole = await pool.query(
+                "SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1",
                 [uid]
             );
-            if (empRes.rows.length === 0)
-                return res.status(403).json({ error: "Nie znaleziono przypisanego salonu" });
 
-            const salonId = empRes.rows[0].salon_id;
+            const isEmployee = empRole.rows.length > 0;
+
+            // ----------------------------------------------------
+            // 🔐 EMPLOYEE — dostęp tylko do jednego salonu
+            // ----------------------------------------------------
+            if (isEmployee) {
+                const employeeSalon = empRole.rows[0].salon_id;
+
+                if (Number(salonId) !== Number(employeeSalon)) {
+                    console.warn("🚨 Employee manipulacja salon_id:", { uid, salonId });
+
+                    loginLocks.set(uid, Date.now() + 5 * 60 * 1000);
+
+                    return res.status(440).json({
+                        error: "Nieautoryzowana zmiana salonu — wylogowano.",
+                        forceLogout: true,
+                        correctSalonId: employeeSalon,
+                        lockForMinutes: 5
+                    });
+                }
+
+                salonId = employeeSalon;
+                console.log("✔ Employee — prawidłowy salon:", employeeSalon);
+            }
+
+            // ----------------------------------------------------
+            // 🔐 PROVIDER — dostęp tylko do salonów, których jest właścicielem
+            // ----------------------------------------------------
+            else {
+                // Pobieramy wszystkie salony providera
+                const providerSalonsRes = await pool.query(
+                    "SELECT id FROM salons WHERE owner_uid=$1",
+                    [uid]
+                );
+
+                const providerSalonIds = providerSalonsRes.rows.map(r => Number(r.id));
+
+                console.log("Salony providera:", providerSalonIds);
+
+                // Czy salon o który pyta użytkownik należy do niego?
+                const hasAccess = providerSalonIds.includes(Number(salonId));
+
+                if (!hasAccess) {
+                    console.warn("🚨 Provider próba wejścia do NIE swojego salonu:", {
+                        uid,
+                        attemptedSalonId: salonId,
+                        providerSalonIds
+                    });
+
+                    return res.status(440).json({
+                        error: "Nie masz dostępu do tego salonu — wylogowano.",
+                        forceLogout: true,
+                        correctSalonId: null,
+                        lockForMinutes: 5
+                    });
+                }
+
+                console.log("✔ Provider — właściciel salonu:", salonId);
+            }
+
+
+
+            
+
+
+            // ----------------------------------------------------
+            // 5️⃣ RESZTA TWOJEGO KODU — BEZ ZMIAN
+            // ----------------------------------------------------
+
             const date =
                 req.query.date ||
                 new Date().toLocaleDateString("en-CA", { timeZone: "Europe/Warsaw" });
             const dayOfWeek = new Date(date).getDay();
 
-            // ✅ Cache 10 minut dla stałych danych
             const cacheKey = `salon_${salonId}`;
             const cacheTTL = 10 * 60 * 1000;
             let baseData = salonCache.get(cacheKey);
             const isExpired = !baseData || Date.now() - baseData.ts > cacheTTL;
 
             if (isExpired) {
-                console.log("♻️ Odświeżanie danych stałych dla salonu", salonId);
-
                 const [
                     holidaysRes,
                     scheduleRes,
                     employeesRes
                 ] = await Promise.all([
                     pool.query("SELECT date FROM salon_holidays WHERE salon_id=$1", [salonId]),
-
                     pool.query(
                         `SELECT employee_id, open_time, close_time, is_day_off, day_of_week
                          FROM employee_schedule
                          WHERE employee_id IN (SELECT id FROM employees WHERE salon_id=$1)`,
                         [salonId]
                     ),
-
                     pool.query(
                         `SELECT 
-				           id AS employee_id,
-				           name AS employee_name,
-				           image_url AS employee_image_url,
-				           is_active
-			             FROM employees
-			             WHERE salon_id=$1 AND is_active=true
-			             ORDER BY name ASC`,
+                           id AS employee_id,
+                           name AS employee_name,
+                           image_url AS employee_image_url,
+                           is_active
+                         FROM employees
+                         WHERE salon_id=$1 AND is_active=true
+                         ORDER BY name ASC`,
                         [salonId]
                     ),
                 ]);
 
-                // ⭐ vacations usunięte z cache
                 baseData = {
                     holidays: holidaysRes.rows,
                     schedule: scheduleRes.rows,
@@ -1207,51 +1424,25 @@ app.get(
                 salonCache.set(cacheKey, baseData);
             }
 
-            // ⭐ Zawsze świeże rezerwacje
+            // ZAWSZE świeże dane
             const appointmentsRes = await pool.query(
-                `SELECT 
-          a.id, a.employee_id, a.date::date AS date,
-          a.start_time, a.end_time,
-          COALESCE(
-             u.name,
-             CONCAT(sc.first_name, ' ', sc.last_name),
-             'Klient'
-          ) AS client_name,
-          a.client_uid,
-
-          COALESCE(s.name, 'Usługa') AS service_name,
-          COALESCE(STRING_AGG(sa.name, ', ' ORDER BY sa.name), '') AS addons
-          FROM appointments a
-
-          LEFT JOIN users u ON a.client_uid = u.uid
-
-          LEFT JOIN salon_clients sc
-            ON sc.first_appointment_id = a.id
-            AND sc.salon_id = a.salon_id
-
-          LEFT JOIN services s ON a.service_id=s.id
-          LEFT JOIN appointment_addons aa ON a.id=aa.appointment_id
-          LEFT JOIN service_addons sa ON aa.addon_id=sa.id
-
-          WHERE a.salon_id=$1 
-            AND a.date=$2
-            AND a.status!='cancelled'
-          GROUP BY
-            a.id,
-            a.employee_id,
-            a.date,
-            a.start_time,
-            a.end_time,
-            u.name,
-            sc.first_name,
-            sc.last_name,
-            s.name
-
-          ORDER BY a.start_time ASC`,
+                `SELECT a.id, a.employee_id, a.date::date, a.start_time, a.end_time,
+                        COALESCE(u.name, CONCAT(sc.first_name, ' ', sc.last_name), 'Klient') AS client_name,
+                        a.client_uid,
+                        COALESCE(s.name, 'Usługa') AS service_name,
+                        COALESCE(STRING_AGG(sa.name, ', ' ORDER BY sa.name), '') AS addons
+                 FROM appointments a
+                 LEFT JOIN users u ON a.client_uid = u.uid
+                 LEFT JOIN salon_clients sc ON sc.first_appointment_id = a.id AND sc.salon_id = a.salon_id
+                 LEFT JOIN services s ON a.service_id=s.id
+                 LEFT JOIN appointment_addons aa ON a.id=aa.appointment_id
+                 LEFT JOIN service_addons sa ON aa.addon_id=sa.id
+                 WHERE a.salon_id=$1 AND a.date=$2 AND a.status!='cancelled'
+                 GROUP BY a.id, u.name, sc.first_name, sc.last_name, s.name
+                 ORDER BY a.start_time ASC`,
                 [salonId, date]
             );
 
-            // ⭐ Zawsze świeże BLOCKED TIME (time_off)
             const timeOffFresh = await pool.query(
                 `SELECT id, employee_id, date, start_time, end_time, reason
                  FROM employee_time_off
@@ -1260,7 +1451,6 @@ app.get(
                 [salonId, date]
             );
 
-            // ⭐ Zawsze świeże urlopy (NOWO!)
             const vacationsFresh = await pool.query(
                 `SELECT employee_id, start_date, end_date 
                  FROM employee_vacations 
@@ -1268,12 +1458,8 @@ app.get(
                 [salonId]
             );
 
-            const isHoliday = baseData.holidays.some(
-                (h) => toYMD(h.date) === date
-            );
+            const isHoliday = baseData.holidays.some((h) => toYMD(h.date) === date);
 
-
-            // 🔹 Zbuduj strukturę pracowników (wizyta, blokada, grafik)
             const employees = baseData.employees.map((emp) => {
                 const schedule = baseData.schedule.find(
                     (s) =>
@@ -1286,15 +1472,12 @@ app.get(
 
                     const start = new Date(v.start_date);
                     const end = new Date(v.end_date);
-
-                    // ⭐ KLUCZOWE — ustaw koniec urlopu na 23:59:59
                     end.setHours(23, 59, 59, 999);
 
                     const current = new Date(date);
 
                     return current >= start && current <= end;
                 });
-
 
                 const isDayOff = isHoliday || isVacation || schedule?.is_day_off;
 
@@ -1303,33 +1486,21 @@ app.get(
                     employee_name: emp.employee_name,
                     employee_image_url: emp.employee_image_url,
                     is_active: emp.is_active,
-
                     day_off: isDayOff,
-
                     working_hours: {
                         open: schedule?.open_time?.slice(0, 5) || "09:00",
                         close: schedule?.close_time?.slice(0, 5) || "17:00",
                     },
-
-                    // ⭐ TERAZ ŚWIEŻE
                     vacations: vacationsFresh.rows.filter(
                         (v) => Number(v.employee_id) === Number(emp.employee_id)
                     ),
-
                     appointments: appointmentsRes.rows.filter(
-                        (a) => a.employee_id === emp.employee_id
+                        (a) => Number(a.employee_id) === Number(emp.employee_id)
                     ),
-
-                    time_off: timeOffFresh.rows
-                        .filter((t) => Number(t.employee_id) === Number(emp.employee_id))
-                        .map((t) => ({
-                            ...t,
-                            id: t.id,
-                            time_off_id: t.id,
-                            employee_id: emp.employee_id,
-                        })),
+                    time_off: timeOffFresh.rows.filter(
+                        (t) => Number(t.employee_id) === Number(emp.employee_id)
+                    ),
                 };
-
             });
 
             res.json({ date, employees });
@@ -1340,6 +1511,8 @@ app.get(
         }
     })
 );
+
+
 
 // ✅ Drag & drop / aktualizacja terminu wizyty
 app.put(
@@ -1632,6 +1805,7 @@ app.put(
 //  EMPLOYEE VACATIONS API
 // =========================
 
+
 app.get(
     "/api/vacations/init",
     verifyToken,
@@ -1639,143 +1813,272 @@ app.get(
         const uid = req.user?.uid;
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-        // pobierz rolę + is_provider z tabeli users
-        const uRes = await pool.query(
+        console.log("🔹 Init vacations start / UID:", uid);
+
+        const salonId = Number(req.query.salon_id || null);
+        console.log("➡ salon_id z frontu:", salonId);
+
+        //
+        // 1️⃣ Pobierz is_provider z USERS
+        //
+        const u = await pool.query(
             "SELECT role, is_provider FROM users WHERE uid = $1 LIMIT 1",
             [uid]
         );
-        const dbUser = uRes.rows[0] || {};
-        const isProvider = !!dbUser.is_provider;
 
-        let employees = [];
+        if (u.rows.length === 0) {
+            return res.status(403).json({ error: "Użytkownik nie istnieje" });
+        }
 
-        if (isProvider) {
-            // 🔹 właściciel – bierzemy pracowników z jego salonu
-            const salonId = await getOwnerSalonId(uid);
-            if (!salonId) {
-                return res.status(403).json({ error: "Brak przypisanego salonu" });
+        const { is_provider } = u.rows[0];
+
+        //
+        // 2️⃣ PROVIDER
+        //
+        if (is_provider === true) {
+            console.log("🔸 PROVIDER DETECTED");
+
+            // Jeśli front wyśle salon_id → zwracamy tylko ten salon
+            if (salonId) {
+                console.log("🔸 Pobieram tylko salon:", salonId);
+
+                const salonRes = await pool.query(
+                    `SELECT id AS salon_id, name AS salon_name
+                     FROM salons
+                     WHERE id = $1 AND owner_uid = $2`,
+                    [salonId, uid]
+                );
+
+                if (salonRes.rows.length === 0) {
+                    return res.status(403).json({ error: "Salon nie należy do providera" });
+                }
+
+                const empRes = await pool.query(
+                    `SELECT id AS employee_id, name AS employee_name
+                     FROM employees
+                     WHERE salon_id = $1 AND is_active = true
+                     ORDER BY name ASC`,
+                    [salonId]
+                );
+
+                return res.json({
+                    is_provider: true,
+                    salons: [
+                        {
+                            salon_id: salonId,
+                            salon_name: salonRes.rows[0].salon_name,
+                            employees: empRes.rows.map(e => ({
+                                id: e.employee_id,
+                                name: e.employee_name
+                            }))
+                        }
+                    ]
+                });
             }
 
-            const empRes = await pool.query(
-                `SELECT id, name
-         FROM employees
-         WHERE salon_id = $1 AND is_active = true
-         ORDER BY name`,
-                [salonId]
-            );
-            employees = empRes.rows;
-        } else {
-            // 🔹 zwykły pracownik – tylko on sam
-            const empRes = await pool.query(
-                `SELECT id, name
-         FROM employees
-         WHERE uid = $1
-         LIMIT 1`,
+            // ⏬ Stare zachowanie – jeśli NIE podano salon_id
+            console.log("🔸 Provider → pobieram WSZYSTKIE salony");
+
+            const salonsRes = await pool.query(
+                `SELECT id AS salon_id, name AS salon_name
+                 FROM salons
+                 WHERE owner_uid = $1`,
                 [uid]
             );
 
-            if (empRes.rows.length === 0) {
-                return res
-                    .status(403)
-                    .json({ error: "Nie znaleziono pracownika powiązanego z kontem" });
-            }
+            const salons = salonsRes.rows;
+            const salonIds = salons.map(s => s.salon_id);
 
-            employees = empRes.rows; // jeden rekord: {id,name}
+            const empRes = await pool.query(
+                `SELECT id AS employee_id, name AS employee_name, salon_id
+                 FROM employees
+                 WHERE salon_id = ANY($1) AND is_active = true
+                 ORDER BY salon_id, name ASC`,
+                [salonIds]
+            );
+
+            const employees = empRes.rows;
+
+            const result = salons.map(salon => ({
+                salon_id: salon.salon_id,
+                salon_name: salon.salon_name,
+                employees: employees
+                    .filter(e => e.salon_id === salon.salon_id)
+                    .map(e => ({
+                        id: e.employee_id,
+                        name: e.employee_name
+                    }))
+            }));
+
+            return res.json({
+                is_provider: true,
+                salons: result
+            });
         }
 
-        res.json({
-            employees,
-            is_provider: isProvider,
-        });
+        //
+        // 3️⃣ EMPLOYEE
+        //
+        console.log("🔸 Nie provider → sprawdzam employees…");
+
+        const emp = await pool.query(
+            `SELECT id AS employee_id, name, salon_id
+             FROM employees
+             WHERE uid = $1 
+             LIMIT 1`,
+            [uid]
+        );
+
+        if (emp.rows.length > 0) {
+            const row = emp.rows[0];
+
+            return res.json({
+                is_provider: false,
+                salon_id: row.salon_id,
+                employees: [
+                    {
+                        id: row.employee_id,
+                        name: row.name
+                    }
+                ]
+            });
+        }
+
+        //
+        // 4️⃣ client
+        //
+        return res.status(403).json({ error: "Brak uprawnień" });
     })
 );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 app.post(
     "/api/vacations",
     verifyToken,
     asyncHandler(async (req, res) => {
         const { employee_id: bodyEmployeeId, start_date, end_date, reason } = req.body;
         const uid = req.user?.uid;
-        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
         if (!start_date || !end_date) {
             return res.status(400).json({ error: "Brak daty urlopu" });
         }
 
-        // pobierz info o użytkowniku (rola + is_provider)
+        console.log("➡ /api/vacations → START", { uid, bodyEmployeeId });
+
+        // 1️⃣ Pobierz dane użytkownika
         const uRes = await pool.query(
             "SELECT role, is_provider FROM users WHERE uid = $1 LIMIT 1",
             [uid]
         );
-        const dbUser = uRes.rows[0] || {};
-        const isProvider = !!dbUser.is_provider;
 
-        let targetEmployeeId;
-        let salonId;
+        if (uRes.rowCount === 0) {
+            return res.status(403).json({ error: "Brak użytkownika" });
+        }
 
+        const isProvider = uRes.rows[0].is_provider === true;
+
+        let targetEmployeeId = null;
+        let salonId = null;
+
+        // ======================================================
+        // 2️⃣ PROVIDER — może wybrać tylko pracownika z WYBRANEGO salonu
+        // ======================================================
         if (isProvider) {
-            // 🔹 Właściciel – może dodać urlop dowolnemu pracownikowi ze swojego salonu
-            salonId = await getOwnerSalonId(uid);
-            if (!salonId) {
-                return res.status(403).json({ error: "Brak przypisanego salonu" });
-            }
+            console.log("🔸 PROVIDER detected");
 
             if (!bodyEmployeeId) {
-                return res
-                    .status(400)
-                    .json({ error: "Musisz wybrać pracownika dla urlopu" });
+                return res.status(400).json({ error: "Musisz wybrać pracownika" });
             }
 
             targetEmployeeId = Number(bodyEmployeeId);
 
-            // sprawdź czy pracownik należy do tego salonu
-            const empCheck = await pool.query(
-                `SELECT id FROM employees WHERE id = $1 AND salon_id = $2`,
-                [targetEmployeeId, salonId]
+            // Pobierz salon pracownika
+            const empRow = await pool.query(
+                `SELECT salon_id FROM employees WHERE id = $1`,
+                [targetEmployeeId]
             );
-            if (empCheck.rowCount === 0) {
-                return res
-                    .status(400)
-                    .json({ error: "Pracownik nie należy do Twojego salonu" });
+
+            if (empRow.rowCount === 0) {
+                return res.status(400).json({ error: "Pracownik nie istnieje" });
             }
-        } else {
-            // 🔹 Pracownik – może dodać urlop tylko sobie
+
+            salonId = empRow.rows[0].salon_id;
+
+            // Sprawdź, czy salon należy do providera
+            const checkOwner = await pool.query(
+                `SELECT 1 FROM salons WHERE id = $1 AND owner_uid = $2`,
+                [salonId, uid]
+            );
+
+            if (checkOwner.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Nie możesz dodawać urlopów pracownikom spoza Twoich salonów"
+                });
+            }
+        }
+
+        // ======================================================
+        // 3️⃣ EMPLOYEE — może dodać urlop tylko SOBIE
+        // ======================================================
+        else {
+            console.log("🔸 EMPLOYEE detected");
+
             const empRes = await pool.query(
                 `SELECT id, salon_id FROM employees WHERE uid = $1 LIMIT 1`,
                 [uid]
             );
-            if (empRes.rows.length === 0) {
-                return res
-                    .status(403)
-                    .json({ error: "Nie znaleziono przypisanego pracownika" });
+
+            if (empRes.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Nie znaleziono przypisanego pracownika"
+                });
             }
+
             targetEmployeeId = empRes.rows[0].id;
             salonId = empRes.rows[0].salon_id;
 
-            // jeśli w body jest inny employee_id → blokujemy
+            // Pracownik NIE może wybrać innego pracownika
             if (
                 bodyEmployeeId &&
                 Number(bodyEmployeeId) !== Number(targetEmployeeId)
             ) {
                 return res.status(403).json({
-                    error: "Nie możesz dodać urlopu innemu pracownikowi",
+                    error: "Nie możesz dodać urlopu innemu pracownikowi"
                 });
             }
         }
 
-        // 💾 zapis
+        console.log("✔ Final employee ID:", targetEmployeeId);
+        console.log("✔ Salon ID:", salonId);
+
+        // ======================================================
+        // 4️⃣ Zapis urlopu
+        // ======================================================
         const result = await pool.query(
             `
-      INSERT INTO employee_vacations (employee_id, start_date, end_date, reason)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *;
-      `,
+            INSERT INTO employee_vacations (employee_id, start_date, end_date, reason)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *;
+        `,
             [targetEmployeeId, start_date, end_date, reason || null]
         );
 
-        // 🧠 USUNIĘCIE CACHE (ważne!)
+        // 5️⃣ Wyczyść cache + powiadom socket.io
         salonCache.delete(`salon_${salonId}`);
 
-        // 📣 POWIADOM WSZYSTKICH UŻYTKOWNIKÓW TEGO SALONU
         io.emit("calendar_updated", {
             type: "vacation_added",
             salon_id: salonId,
@@ -1783,6 +2086,7 @@ app.post(
             vacation: result.rows[0],
         });
 
+        console.log("✔ Vacation saved:", result.rows[0]);
 
         res.json({
             success: true,
@@ -1790,6 +2094,8 @@ app.post(
         });
     })
 );
+
+
 
 
 
@@ -1809,82 +2115,120 @@ app.get(
             return res.status(401).json({ error: "Brak użytkownika" });
         }
 
-        // 🔥 znajdź salon z pracownika
-        const salonRes = await pool.query(
-            `
-      SELECT salon_id
-      FROM employees
-      WHERE uid = $1
-      LIMIT 1
-      `,
+        // 1️⃣ Sprawdź rolę użytkownika
+        const userRes = await pool.query(
+            `SELECT is_provider FROM users WHERE uid = $1 LIMIT 1`,
             [uid]
         );
 
-        if (salonRes.rows.length === 0) {
-            return res.status(403).json({ error: "Nie znaleziono salonu dla pracownika" });
+        const isProvider = userRes.rows[0]?.is_provider === true;
+
+        let salon_id;
+
+        // 2️⃣ Provider → musi podać salon_id
+        if (isProvider) {
+            salon_id = req.query.salon_id;
+
+            if (!salon_id) {
+                return res.status(400).json({
+                    error: "Brak salon_id — provider musi wskazać salon"
+                });
+            }
+
+            // sprawdzamy czy salon należy do providera
+            const check = await pool.query(
+                `SELECT id FROM salons WHERE id = $1 AND owner_uid = $2`,
+                [salon_id, uid]
+            );
+
+            if (check.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Ten salon nie należy do Twojego konta"
+                });
+            }
         }
 
-        const { salon_id } = salonRes.rows[0];
+        // 3️⃣ Pracownik → pobieramy salon z employees
+        else {
+            const salonRes = await pool.query(
+                `
+                SELECT salon_id
+                FROM employees
+                WHERE uid = $1
+                LIMIT 1
+            `,
+                [uid]
+            );
 
-        // 🔥 Unikalni klienci z salon_clients
+            if (salonRes.rows.length === 0) {
+                return res.status(403).json({
+                    error: "Nie znaleziono salonu dla pracownika"
+                });
+            }
+
+            salon_id = salonRes.rows[0].salon_id;
+        }
+
+        // 4️⃣ Pobieramy klientów
         const clientsRes = await pool.query(
             `
-      SELECT DISTINCT ON (phone)
-        id,
-        first_name,
-        last_name,
-        phone,
-        client_uid,
-        created_at
-      FROM salon_clients
-      WHERE salon_id = $1
-      ORDER BY phone, created_at DESC
-      `,
+            SELECT DISTINCT ON (phone)
+                id,
+                first_name,
+                last_name,
+                phone,
+                client_uid,
+                created_at
+            FROM salon_clients
+            WHERE salon_id = $1
+            ORDER BY phone, created_at DESC
+        `,
             [salon_id]
         );
 
-        // Pracownicy
+        // 5️⃣ Pobieramy pracowników
         const employeesRes = await pool.query(
             `
-      SELECT id, name
-      FROM employees
-      WHERE salon_id = $1
-      AND is_active = TRUE
-      ORDER BY name
-      `,
+            SELECT id, name
+            FROM employees
+            WHERE salon_id = $1
+            AND is_active = TRUE
+            ORDER BY name
+        `,
             [salon_id]
         );
 
-        // Usługi
+        // 6️⃣ Pobieramy usługi
         const servicesRes = await pool.query(
             `
-      SELECT id, name, price, duration_minutes
-      FROM services
-      WHERE salon_id = $1
-      AND is_active = TRUE
-      ORDER BY name
-      `,
+            SELECT id, name, price, duration_minutes
+            FROM services
+            WHERE salon_id = $1
+            AND is_active = TRUE
+            ORDER BY name
+        `,
             [salon_id]
         );
 
-        // Addony
+        // 7️⃣ Pobieramy dodatki
         const addonsRes = await pool.query(
             `
-      SELECT DISTINCT
-        sa.id,
-        sa.name,
-        sa.price,
-        sa.duration_minutes,
-        sal.service_id
-      FROM service_addons sa
-      LEFT JOIN service_addon_links sal ON sal.addon_id = sa.id
-      WHERE sa.salon_id = $1
-      AND sa.is_active = TRUE
-      ORDER BY sa.name
-      `,
+            SELECT DISTINCT
+                sa.id,
+                sa.name,
+                sa.price,
+                sa.duration_minutes,
+                sal.service_id
+            FROM service_addons sa
+            LEFT JOIN service_addon_links sal ON sal.addon_id = sa.id
+            WHERE sa.salon_id = $1
+            AND sa.is_active = TRUE
+            ORDER BY sa.name
+        `,
             [salon_id]
         );
 
+        // 8️⃣ Odpowiedź
         res.json({
             clients: clientsRes.rows,
             employees: employeesRes.rows,
@@ -1893,6 +2237,7 @@ app.get(
         });
     })
 );
+
 
 app.post(
     "/api/appointments/new",
@@ -2095,6 +2440,14 @@ app.post(
             return res.status(400).json({ error: "Brak wymaganych danych" });
         }
 
+        const uid = req.user?.uid;
+
+        // 1️⃣ salon wybrany przez PROVIDERA, jeśli istnieje
+        let selectedSalonId = req.query.salon_id ? Number(req.query.salon_id) : null;
+
+        console.log("➡ create-from-panel → UID:", uid, "selectedSalon:", selectedSalonId);
+
+        // 2️⃣ Pobieramy salon pracownika z employee_id
         const empRes = await pool.query(
             `SELECT salon_id FROM employees WHERE id = $1`,
             [employee_id]
@@ -2104,22 +2457,43 @@ app.post(
             return res.status(404).json({ error: "Pracownik nie istnieje" });
         }
 
-        const salon_id = empRes.rows[0].salon_id;
+        const employeeSalonId = empRes.rows[0].salon_id;
 
+        // 3️⃣ Jeśli provider → musi zgadzać się salon
         const userRes = await pool.query(
-            `SELECT uid, name, phone FROM users WHERE id = $1`,
+            `SELECT is_provider FROM users WHERE uid = $1`,
+            [uid]
+        );
+
+        const isProvider = userRes.rows[0]?.is_provider === true;
+
+        if (isProvider) {
+            if (!selectedSalonId) {
+                return res.status(400).json({ error: "Provider musi podać salon_id" });
+            }
+
+            if (selectedSalonId !== employeeSalonId) {
+                return res.status(403).json({
+                    error: "Pracownik nie należy do wybranego salonu providera"
+                });
+            }
+        }
+
+        // 4️⃣ Używamy salonu pracownika (jest pewny)
+        const salon_id = employeeSalonId;
+
+        // 5️⃣ Szukamy klienta — czy to użytkownik, czy lokalny
+        const userClient = await pool.query(
+            `SELECT uid, name, phone FROM users WHERE id=$1`,
             [client_id]
         );
 
         let client_uid = null;
         let client_local_id = null;
-        let first_name = null;
-        let last_name = null;
-        let phone = null;
+        let first_name, last_name, phone;
 
-        if (userRes.rows.length > 0) {
-            // 🔥 klient z kontem
-            const row = userRes.rows[0];
+        if (userClient.rows.length > 0) {
+            const row = userClient.rows[0];
             client_uid = row.uid;
             phone = row.phone;
 
@@ -2127,14 +2501,16 @@ app.post(
             first_name = parts.shift() || "";
             last_name = parts.join(" ") || "";
         } else {
-            // 🔥 klient lokalny
+            // klient lokalny
             const localRes = await pool.query(
-                `SELECT first_name, last_name, phone FROM salon_clients WHERE id = $1 AND salon_id = $2`,
+                `SELECT first_name, last_name, phone 
+                 FROM salon_clients 
+                 WHERE id=$1 AND salon_id=$2`,
                 [client_id, salon_id]
             );
 
             if (!localRes.rows.length) {
-                return res.status(404).json({ error: "Lokalny klient nie istnieje" });
+                return res.status(404).json({ error: "Klient lokalny nie istnieje w tym salonie" });
             }
 
             const row = localRes.rows[0];
@@ -2151,22 +2527,15 @@ app.post(
 
             const apptRes = await db.query(
                 `
-        INSERT INTO appointments (
-          salon_id,
-          client_uid,
-          client_local_id,
-          employee_id,
-          service_id,
-          date,
-          start_time,
-          end_time,
-          status,
-          created_at
-        ) VALUES (
-          $1,$2,$3,$4,$5,$6,$7,$8,'booked',NOW()
-        )
-        RETURNING *
-        `,
+                INSERT INTO appointments (
+                    salon_id, client_uid, client_local_id, employee_id,
+                    service_id, date, start_time, end_time, status, created_at
+                )
+                VALUES (
+                    $1,$2,$3,$4,$5,$6,$7,$8,'booked',NOW()
+                )
+                RETURNING *
+                `,
                 [
                     salon_id,
                     client_uid,
@@ -2181,19 +2550,15 @@ app.post(
 
             const newAppt = apptRes.rows[0];
 
-            // Zawsze zapisujemy klienta
+            // zapis klienta
             await db.query(
                 `
-        INSERT INTO salon_clients (
-          salon_id,
-          employee_id,
-          client_uid,
-          first_appointment_id,
-          first_name,
-          last_name,
-          phone
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7)
-        `,
+                INSERT INTO salon_clients (
+                    salon_id, employee_id, client_uid,
+                    first_appointment_id, first_name, last_name, phone
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                `,
                 [
                     salon_id,
                     employee_id,
@@ -2205,12 +2570,13 @@ app.post(
                 ]
             );
 
+            // dodatki
             if (addons.length > 0) {
                 await db.query(
                     `
-          INSERT INTO appointment_addons (appointment_id, addon_id)
-          VALUES ${addons.map((_, i) => `($1, $${i + 2})`).join(",")}
-          `,
+                    INSERT INTO appointment_addons (appointment_id, addon_id)
+                    VALUES ${addons.map((_, i) => `($1, $${i + 2})`).join(",")}
+                    `,
                     [newAppt.id, ...addons]
                 );
             }
@@ -2230,13 +2596,14 @@ app.post(
 
         } catch (err) {
             await db.query("ROLLBACK");
-            console.error("❌ Błąd:", err);
+            console.error("❌ create-from-panel błąd:", err);
             res.status(500).json({ error: "Błąd podczas tworzenia wizyty" });
         } finally {
             db.release();
         }
     })
 );
+
 
 
 
@@ -3510,20 +3877,84 @@ app.post(
 // ===========================
 
 // 📋 Lista blokad czasu (dla właściciela salonu)
-app.get("/api/schedule/time-off", verifyToken, requireEmployeeOrProviderRole, asyncHandler(async (req, res) => {
-    const salonId = await getOwnerSalonId(req.user.uid);
-    if (!salonId) return res.status(403).json({ error: "Brak przypisanego salonu" });
+app.get(
+    "/api/schedule/time-off",
+    verifyToken,
+    requireEmployeeOrProviderRole,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-    const result = await pool.query(`
-    SELECT t.*, e.name AS employee_name
-    FROM employee_time_off t
-    JOIN employees e ON e.id = t.employee_id
-    WHERE e.salon_id = $1
-    ORDER BY t.date, t.start_time;
-  `, [salonId]);
+        const salonIdFromQuery = req.query.salon_id
+            ? Number(req.query.salon_id)
+            : null;
 
-    res.json(result.rows);
-}));
+        // 🔹 Pobierz info o użytkowniku
+        const userRes = await pool.query(
+            "SELECT is_provider FROM users WHERE uid = $1 LIMIT 1",
+            [uid]
+        );
+
+        if (userRes.rowCount === 0) {
+            return res.status(403).json({ error: "Użytkownik nie istnieje" });
+        }
+
+        const isProvider = userRes.rows[0].is_provider === true;
+
+        let salonId;
+
+        if (isProvider) {
+            // PROVIDER → musi podać salon_id z frontu
+            if (!salonIdFromQuery) {
+                return res.status(400).json({
+                    error: "Provider musi wybrać salon (brak salon_id)",
+                });
+            }
+
+            // 🔐 Sprawdź, czy ten salon faktycznie należy do providera
+            const salonCheck = await pool.query(
+                "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2",
+                [salonIdFromQuery, uid]
+            );
+
+            if (salonCheck.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Ten salon nie należy do zalogowanego providera",
+                });
+            }
+
+            salonId = salonIdFromQuery;
+        } else {
+            // PRACOWNIK → bierzemy salon z tabeli employees
+            const empRes = await pool.query(
+                "SELECT salon_id FROM employees WHERE uid = $1 LIMIT 1",
+                [uid]
+            );
+
+            if (empRes.rowCount === 0) {
+                return res
+                    .status(403)
+                    .json({ error: "Brak przypisanego salonu" });
+            }
+
+            salonId = empRes.rows[0].salon_id;
+        }
+
+        const result = await pool.query(
+            `
+            SELECT t.*, e.name AS employee_name
+            FROM employee_time_off t
+            JOIN employees e ON e.id = t.employee_id
+            WHERE e.salon_id = $1
+            ORDER BY t.date, t.start_time;
+        `,
+            [salonId]
+        );
+
+        res.json(result.rows);
+    })
+);
+
 
 // ➕ Dodaj nową blokadę czasu
 app.post(
@@ -3531,23 +3962,121 @@ app.post(
     verifyToken,
     requireEmployeeOrProviderRole,
     asyncHandler(async (req, res) => {
-        const { employee_id, date, start_time, end_time, reason } = req.body;
+        const { employee_id: bodyEmployeeId, date, start_time, end_time, reason } = req.body;
+        const uid = req.user?.uid;
 
-        if (!employee_id || !date || !start_time || !end_time)
-            return res.status(400).json({ error: "Brak wymaganych pól" });
+        if (!uid) {
+            return res.status(401).json({ error: "Brak autoryzacji" });
+        }
 
+        if (!date || !start_time || !end_time) {
+            return res
+                .status(400)
+                .json({ error: "Brak wymaganych pól (data / godziny)" });
+        }
+
+        // 🔹 Pobierz dane użytkownika
+        const uRes = await pool.query(
+            "SELECT is_provider FROM users WHERE uid = $1 LIMIT 1",
+            [uid]
+        );
+
+        if (uRes.rowCount === 0) {
+            return res.status(403).json({ error: "Brak użytkownika" });
+        }
+
+        const isProvider = uRes.rows[0].is_provider === true;
+
+        let targetEmployeeId;
+        let salonId;
+
+        // ======================================================
+        // 1️⃣ PROVIDER — może wybrać dowolnego pracownika ZE SWOICH salonów
+        // ======================================================
+        if (isProvider) {
+            if (!bodyEmployeeId) {
+                return res
+                    .status(400)
+                    .json({ error: "Musisz wybrać pracownika" });
+            }
+
+            targetEmployeeId = Number(bodyEmployeeId);
+
+            // 🔐 Sprawdź, czy ten pracownik należy do salonu providera
+            const empRow = await pool.query(
+                `
+                SELECT e.id, e.salon_id
+                FROM employees e
+                JOIN salons s ON s.id = e.salon_id
+                WHERE e.id = $1
+                  AND s.owner_uid = $2
+                LIMIT 1
+            `,
+                [targetEmployeeId, uid]
+            );
+
+            if (empRow.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Nie możesz blokować czasu pracownikom spoza Twoich salonów",
+                });
+            }
+
+            salonId = empRow.rows[0].salon_id;
+        }
+
+        // ======================================================
+        // 2️⃣ EMPLOYEE — może dodać blokadę tylko SOBIE
+        // ======================================================
+        else {
+            const empRes = await pool.query(
+                `
+                SELECT id, salon_id
+                FROM employees
+                WHERE uid = $1
+                LIMIT 1
+            `,
+                [uid]
+            );
+
+            if (empRes.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Nie znaleziono przypisanego pracownika",
+                });
+            }
+
+            targetEmployeeId = empRes.rows[0].id;
+            salonId = empRes.rows[0].salon_id;
+
+            if (
+                bodyEmployeeId &&
+                Number(bodyEmployeeId) !== Number(targetEmployeeId)
+            ) {
+                return res.status(403).json({
+                    error: "Nie możesz dodać blokady innemu pracownikowi",
+                });
+            }
+        }
+
+        // ======================================================
+        // 3️⃣ Zapis blokady czasu
+        // ======================================================
         const result = await pool.query(
             `
-      INSERT INTO employee_time_off (employee_id, date, start_time, end_time, reason)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING *
-    `,
-            [employee_id, date, start_time, end_time, reason || null]
+            INSERT INTO employee_time_off (employee_id, date, start_time, end_time, reason)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *;
+        `,
+            [targetEmployeeId, date, start_time, end_time, reason || null]
         );
 
         const t = result.rows[0];
 
-        // 🔥 LIVE UPDATE
+        // (opcjonalnie) jeśli używasz salonCache, możesz go tu wyczyścić
+        if (typeof salonCache !== "undefined") {
+            salonCache.delete(`salon_${salonId}`);
+        }
+
+        // 🔥 LIVE UPDATE — jak wcześniej
         try {
             io.emit("calendar_updated", {
                 type: "time_off_added",
@@ -3555,14 +4084,21 @@ app.post(
                 time_off: t,
             });
 
-            console.log("📡 Wysłano calendar_updated (ADD time_off):", t.id);
+            console.log(
+                "📡 Wysłano calendar_updated (ADD time_off):",
+                t.id
+            );
         } catch (emitErr) {
-            console.warn("⚠️ Nie udało się wysłać socket eventu (ADD):", emitErr);
+            console.warn(
+                "⚠️ Nie udało się wysłać socket eventu (ADD):",
+                emitErr
+            );
         }
 
         res.json({ message: "✅ Zablokowano czas pracownika", time_off: t });
     })
 );
+
 
 
 // 🗑️ Usuń blokadę czasu — właściciel salonu LUB pracownik (swoją własną)
@@ -4281,27 +4817,36 @@ app.post(
             return res.status(400).json({ error: "Podaj imię lub nazwisko" });
         }
 
-        // salon z pracownika
-        const salonRes = await pool.query(
-            `SELECT salon_id FROM employees WHERE uid = $1 LIMIT 1`,
-            [uid]
-        );
+        console.log("➡ create-local → UID:", uid, "query.salon:", req.query.salon_id);
 
-        if (!salonRes.rows.length) {
-            return res.status(403).json({ error: "Brak salonu" });
+        // 1) najpierw bierzemy salon z query (provider)
+        let salonId = req.query.salon_id ? Number(req.query.salon_id) : null;
+
+        if (!salonId) {
+            // 2) jeśli brak → bierzemy salon pracownika
+            const empRes = await pool.query(
+                `SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1`,
+                [uid]
+            );
+
+            if (!empRes.rows.length) {
+                return res.status(403).json({ error: "Brak salonu" });
+            }
+
+            salonId = empRes.rows[0].salon_id;
         }
 
-        const salon_id = salonRes.rows[0].salon_id;
+        console.log("✔ używamy salon_id:", salonId);
 
+        // 3) zapis lokalnego klienta
         const insertRes = await pool.query(
             `
-      INSERT INTO salon_clients
-        (salon_id, client_uid, first_name, last_name, phone)
-      VALUES
-        ($1, NULL, $2, $3, $4)
-      RETURNING *
-      `,
-            [salon_id, first_name || "", last_name || "", phone || ""]
+            INSERT INTO salon_clients
+                (salon_id, client_uid, first_name, last_name, phone)
+            VALUES ($1, NULL, $2, $3, $4)
+            RETURNING *
+            `,
+            [salonId, first_name || "", last_name || "", phone || ""]
         );
 
         const row = insertRes.rows[0];
@@ -4312,11 +4857,11 @@ app.post(
                 first_name: row.first_name,
                 last_name: row.last_name,
                 phone: row.phone || "",
-
             },
         });
     })
 );
+
 
 
 
