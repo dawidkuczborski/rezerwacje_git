@@ -65,14 +65,20 @@ export default function Clients() {
         setLoading(true);
         const token = await firebaseUser.getIdToken();
 
-        const url = `${backend}/api/clients`;
-        url.searchParams.set("salon_id", salonId);
-        url.searchParams.set("page", page);
-        url.searchParams.set("limit", limit);
-        if (query.trim() !== "") url.searchParams.set("q", query);
-        if (employeeFilter !== "all") url.searchParams.set("employee_id", employeeFilter);
+        // jeśli backend jest pusty → będzie "/api/clients"
+        const baseUrl = backend ? `${backend}/api/clients` : `/api/clients`;
 
-        const res = await fetch(url.toString(), {
+        // poprawne ustawianie parametrów
+        const params = new URLSearchParams();
+        params.set("salon_id", salonId);
+        params.set("page", page);
+        params.set("limit", limit);
+        if (query.trim() !== "") params.set("q", query);
+        if (employeeFilter !== "all") params.set("employee_id", employeeFilter);
+
+        const finalUrl = `${baseUrl}?${params.toString()}`;
+
+        const res = await fetch(finalUrl, {
             headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -84,6 +90,7 @@ export default function Clients() {
         setTotal(data.total);
         setLoading(false);
     };
+
 
     useEffect(() => {
         loadEmployees();
