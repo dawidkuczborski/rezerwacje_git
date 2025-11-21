@@ -139,7 +139,8 @@ export default function Clients() {
         <div className="w-full bg-[#f7f7f7] min-h-screen pb-24">
 
             {/* WSPÓLNY HEADER – ten sam wygląd, zmienia się tylko treść */}
-            <div className="bg-[#e57b2c] pt-14 pb-10 px-6">
+            <div className="bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
+
                 {!selectedClient && (
                     <h1 className="text-white text-[26px] font-semibold">Klienci</h1>
 
