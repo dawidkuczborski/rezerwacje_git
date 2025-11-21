@@ -149,7 +149,7 @@ export default function Clients() {
                 {selectedClient && (
                     <button
                         onClick={() => setSelectedClient(null)}
-                        className="text-white flex items-center gap-2 text-[18px] py-[10px]"
+                        className="text-white flex items-center gap-2 text-[18px] py-[7px]"
                     >
                         <ArrowLeft size={20} strokeWidth={2.2} />
                         Powrót
