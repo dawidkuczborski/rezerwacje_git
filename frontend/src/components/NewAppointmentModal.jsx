@@ -3,7 +3,8 @@ import axios from "axios";
 import { X, Save, CheckCircle, UserPlus } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export default function NewAppointmentModal({ open, onClose, activeDay, onCreated }) {
+export default function NewAppointmentModal({ open, onClose, activeDay, onCreated, prefill }) {
+
     const [clients, setClients] = useState([]);
     const [clientSearch, setClientSearch] = useState("");
     const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -73,10 +74,16 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 setServices(res.data.services || []);
                 setAddons(res.data.addons || []);
 
-                setForm((prev) => ({
-                    ...prev,
-                    date: activeDay.toISOString().split("T")[0],
-                }));
+                if (!prefill) {
+                    setForm((prev) => ({
+                        ...prev,
+                        date: activeDay
+                            ? activeDay.toISOString().split("T")[0]
+                            : new Date().toISOString().split("T")[0],
+                    }));
+                }
+
+
             } catch (err) {
                 console.error("LOAD ERROR:", err);
             }
@@ -84,6 +91,20 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
         load();
     }, [open]);
+
+    // PREFILL przy UMÓW PONOWNIE
+    useEffect(() => {
+        if (!open || !prefill) return;
+
+        setForm((prev) => ({
+            ...prev,
+            client_id: prefill.client_id || "",
+            employee_id: prefill.employee_id || "",
+            service_id: prefill.service_id || "",
+            addons: prefill.addons || [],
+        }));
+    }, [open, prefill]);
+
 
     // FETCH SLOTS
     const fetchSlots = async (empId, srvId, date, addonList) => {

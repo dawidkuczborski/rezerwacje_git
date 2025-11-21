@@ -2550,25 +2550,37 @@ app.post(
 
             const newAppt = apptRes.rows[0];
 
-            // zapis klienta
-            await db.query(
-                `
-                INSERT INTO salon_clients (
-                    salon_id, employee_id, client_uid,
-                    first_appointment_id, first_name, last_name, phone
-                )
-                VALUES ($1,$2,$3,$4,$5,$6,$7)
-                `,
-                [
-                    salon_id,
-                    employee_id,
-                    client_uid,
-                    newAppt.id,
-                    first_name,
-                    last_name,
-                    phone
-                ]
-            );
+            // -- ZAPIS KLIENTA Z BLOKADĄ DUPLIKATÓW --
+
+            if (!client_uid && !phone) {
+                console.warn("❗ Pomijam dodanie klienta – brak uid i telefonu");
+            } else {
+                await db.query(
+                    `
+        INSERT INTO salon_clients (
+            salon_id,
+            employee_id,
+            client_uid,
+            first_appointment_id,
+            first_name,
+            last_name,
+            phone
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT DO NOTHING
+        `,
+                    [
+                        salon_id,
+                        employee_id,
+                        client_uid,
+                        newAppt.id,
+                        first_name,
+                        last_name,
+                        phone
+                    ]
+                );
+            }
+
 
             // dodatki
             if (addons.length > 0) {
@@ -3398,6 +3410,259 @@ app.post("/api/appointments/create-from-panel", async (req, res) => {
         client.release();
     }
 });
+
+
+///api strony chose salon
+
+// GET /api/provider/salons
+app.get(
+    "/api/provider/salons",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+
+        const ownerUid = req.user.uid;
+
+        const result = await pool.query(
+            `SELECT 
+                id, 
+                name, 
+                city, 
+                street, 
+                street_number, 
+                postal_code,
+                phone,
+                image_url
+            FROM salons
+            WHERE owner_uid = $1 AND is_active = TRUE
+            ORDER BY id DESC`,
+            [ownerUid]
+        );
+
+        res.json(result.rows);
+    })
+);
+
+/// api listy urlopów
+app.get(
+    "/api/vacations/list",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        const { year, month, page = 1, limit = 10, employee_id } = req.query;
+        const salonId = Number(req.query.salon_id || null);
+        const offset = (page - 1) * limit;
+
+        //
+        // 1️⃣ Pobierz usera
+        //
+        const u = await pool.query(
+            "SELECT role, is_provider FROM users WHERE uid = $1 LIMIT 1",
+            [uid]
+        );
+
+        if (u.rows.length === 0) {
+            return res.status(403).json({ error: "Użytkownik nie istnieje" });
+        }
+
+        const isProvider = u.rows[0].is_provider === true;
+
+        //
+        // 2️⃣ PROVIDER
+        //
+        if (isProvider) {
+            if (!salonId) {
+                return res.status(400).json({ error: "Brak salon_id dla providera" });
+            }
+
+            // Provider może widzieć tylko swoje salony
+            const salonCheck = await pool.query(
+                "SELECT id FROM salons WHERE id = $1 AND owner_uid = $2 LIMIT 1",
+                [salonId, uid]
+            );
+
+            if (salonCheck.rows.length === 0) {
+                return res.status(403).json({ error: "Salon nie należy do providera" });
+            }
+
+            // 🔧 dynamiczne warunki
+            const whereParts = ["e.salon_id = $1"];
+            const params = [salonId];
+
+            if (year) {
+                params.push(Number(year));
+                whereParts.push(`EXTRACT(YEAR FROM v.start_date) = $${params.length}`);
+            }
+
+            if (month) {
+                params.push(Number(month));
+                whereParts.push(`EXTRACT(MONTH FROM v.start_date) = $${params.length}`);
+            }
+
+            if (employee_id && employee_id !== "all") {
+                params.push(Number(employee_id));
+                whereParts.push(`v.employee_id = $${params.length}`);
+            }
+
+            const whereSQL = whereParts.join(" AND ");
+
+            const listSQL = `
+                SELECT
+                    v.id,
+                    v.employee_id,
+                    v.start_date,
+                    v.end_date,
+                    v.reason,
+                    v.created_at,
+
+                    -- 🔥 tu dodajemy zdjęcie i imię pracownika
+                    e.name AS employee_name,
+                    e.image_url AS employee_image
+
+                FROM employee_vacations v
+                JOIN employees e ON e.id = v.employee_id
+                WHERE ${whereSQL}
+                ORDER BY v.start_date DESC
+                LIMIT ${limit} OFFSET ${offset}
+            `;
+
+            const countSQL = `
+                SELECT COUNT(*) AS total
+                FROM employee_vacations v
+                JOIN employees e ON e.id = v.employee_id
+                WHERE ${whereSQL}
+            `;
+
+            const list = await pool.query(listSQL, params);
+            const count = await pool.query(countSQL, params);
+
+            return res.json({
+                is_provider: true,
+                total: Number(count.rows[0].total),
+                page: Number(page),
+                limit: Number(limit),
+                items: list.rows
+            });
+        }
+
+        //
+        // 3️⃣ EMPLOYEE
+        //
+        const emp = await pool.query(
+            `SELECT id AS employee_id
+             FROM employees
+             WHERE uid = $1
+             LIMIT 1`,
+            [uid]
+        );
+
+        if (emp.rows.length === 0) {
+            return res.status(403).json({ error: "Brak uprawnień" });
+        }
+
+        const employeeId = emp.rows[0].employee_id;
+
+        const whereParts = ["v.employee_id = $1"];
+        const params = [employeeId];
+
+        if (year) {
+            params.push(Number(year));
+            whereParts.push(`EXTRACT(YEAR FROM v.start_date) = $${params.length}`);
+        }
+
+        if (month) {
+            params.push(Number(month));
+            whereParts.push(`EXTRACT(MONTH FROM v.start_date) = $${params.length}`);
+        }
+
+        const whereSQL = whereParts.join(" AND ");
+
+        const listSQL = `
+            SELECT
+                v.id,
+                v.employee_id,
+                v.start_date,
+                v.end_date,
+                v.reason,
+                v.created_at,
+
+                -- 🔥 tu również dodajemy zdjęcie i imię
+                e.name AS employee_name,
+                e.image_url AS employee_image
+
+            FROM employee_vacations v
+            JOIN employees e ON e.id = v.employee_id
+            WHERE ${whereSQL}
+            ORDER BY v.start_date DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+
+        const countSQL = `
+            SELECT COUNT(*) AS total
+            FROM employee_vacations v
+            WHERE ${whereSQL}
+        `;
+
+        const list = await pool.query(listSQL, params);
+        const count = await pool.query(countSQL, params);
+
+        return res.json({
+            is_provider: false,
+            total: Number(count.rows[0].total),
+            page: Number(page),
+            limit: Number(limit),
+            items: list.rows
+        });
+    })
+);
+
+
+
+
+app.delete(
+    "/api/vacations/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const id = req.params.id;
+
+        await pool.query(
+            `DELETE FROM employee_vacations WHERE id = $1`,
+            [id]
+        );
+
+        res.json({ message: "Urlop usunięty" });
+    })
+);
+app.put(
+    "/api/vacations/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const id = req.params.id;
+        const { start_date, end_date, reason } = req.body;
+
+        await pool.query(
+            `
+            UPDATE employee_vacations
+            SET start_date = $1, end_date = $2, reason = $3
+            WHERE id = $4
+        `,
+            [start_date, end_date, reason, id]
+        );
+
+        res.json({ message: "Urlop zaktualizowany" });
+    })
+);
+
+
+
+
+
+
+
 
 ///PRACOWNIK/////
 // Create salon (with optional image)
@@ -4698,6 +4963,29 @@ app.post(
                 return res.status(409).json({ error: "Ten termin jest już zajęty" });
             }
 
+            // 🔥 LIMIT ile razy klient może zarezerwować daną usługę w jednym dniu
+            const maxBookingsPerDay = 2;  // zmień na 1 jeśli ma być tylko 1 rezerwacja
+
+            const limitCheck = await client.query(
+                `SELECT COUNT(*) AS cnt
+     FROM appointments
+     WHERE client_uid = $1
+       AND service_id = $2
+       AND date = $3
+       AND status = 'booked'`,
+                [client_uid, service_id, date]
+            );
+
+            if (Number(limitCheck.rows[0].cnt) >= maxBookingsPerDay) {
+                await client.query("ROLLBACK");
+                return res.status(400).json({
+                    error: maxBookingsPerDay === 1
+                        ? "Możesz zarezerwować tylko jedną taką usługę dziennie."
+                        : `Możesz zarezerwować maksymalnie ${maxBookingsPerDay} takie usługi dziennie.`
+                });
+            }
+
+
             const salonRes = await client.query(
                 `SELECT salon_id FROM employees WHERE id = $1`,
                 [employee_id]
@@ -4720,29 +5008,33 @@ app.post(
 
             const appointmentId = insertRes.rows[0].id;
 
-            // 🔥 Dopisz klienta — ZAWSZE nowy rekord
-            await client.query(
-                `INSERT INTO salon_clients (
-           salon_id,
-           employee_id,
-           client_uid,
-           first_appointment_id,
-           first_name,
-           last_name,
-           phone
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-        `,
-                [
-                    salon_id,
-                    employee_id,
-                    client_uid,
-                    appointmentId,
-                    first_name,
-                    last_name,
-                    phone
-                ]
-            );
+            if (!client_uid && !phone) {
+                console.warn("❗ Pomijam dodanie klienta, brak uid i telefonu");
+            } else {
+                await client.query(
+                    `INSERT INTO salon_clients (
+            salon_id,
+            employee_id,
+            client_uid,
+            first_appointment_id,
+            first_name,
+            last_name,
+            phone
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT DO NOTHING`,
+                    [
+                        salon_id,
+                        employee_id,
+                        client_uid,
+                        appointmentId,
+                        first_name,
+                        last_name,
+                        phone
+                    ]
+                );
+            }
+
 
             if (Array.isArray(addons) && addons.length > 0) {
                 const vals = addons.map((_, i) => `($1, $${i + 2})`).join(", ");
@@ -4806,61 +5098,227 @@ app.post(
 );
 
 
-app.post(
-    "/api/clients/create-local",
+
+
+app.get(
+    "/api/clients",
     verifyToken,
     asyncHandler(async (req, res) => {
-        const { first_name, last_name, phone } = req.body;
         const uid = req.user?.uid;
+        let { q, employee_id, page = 1, limit = 20, salon_id } = req.query;
 
-        if (!first_name && !last_name) {
-            return res.status(400).json({ error: "Podaj imię lub nazwisko" });
-        }
-
-        console.log("➡ create-local → UID:", uid, "query.salon:", req.query.salon_id);
-
-        // 1) najpierw bierzemy salon z query (provider)
-        let salonId = req.query.salon_id ? Number(req.query.salon_id) : null;
+        // -------- AUTO-DETEKCJA SALONU --------
+        let salonId = Number(salon_id);
 
         if (!salonId) {
-            // 2) jeśli brak → bierzemy salon pracownika
-            const empRes = await pool.query(
-                `SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1`,
+            // jeśli nie ma w query → sprawdź czy to pracownik
+            const emp = await pool.query(
+                `SELECT salon_id FROM employees WHERE uid = $1 LIMIT 1`,
                 [uid]
             );
 
-            if (!empRes.rows.length) {
-                return res.status(403).json({ error: "Brak salonu" });
+            if (emp.rows.length > 0) {
+                salonId = emp.rows[0].salon_id; // pracownik
             }
-
-            salonId = empRes.rows[0].salon_id;
         }
 
-        console.log("✔ używamy salon_id:", salonId);
+        if (!salonId) {
+            return res.status(400).json({ error: "Brak salon_id" });
+        }
+        // --------------------------------------
 
-        // 3) zapis lokalnego klienta
-        const insertRes = await pool.query(
-            `
-            INSERT INTO salon_clients
-                (salon_id, client_uid, first_name, last_name, phone)
-            VALUES ($1, NULL, $2, $3, $4)
-            RETURNING *
-            `,
-            [salonId, first_name || "", last_name || "", phone || ""]
+        const pageNum = Math.max(1, Number(page) || 1);
+        const lim = Math.min(100, Math.max(1, Number(limit) || 20));
+        const offset = (pageNum - 1) * lim;
+
+        const whereParts = ["sc.salon_id = $1"];
+        const params = [salonId];
+        let idx = params.length + 1;
+
+        // filtr po pracowniku
+        if (employee_id && employee_id !== "all") {
+            whereParts.push(`sc.employee_id = $${idx++}`);
+            params.push(Number(employee_id));
+        }
+
+        // wyszukiwarka
+        if (q && q.trim() !== "") {
+            const like = `%${q.trim()}%`;
+            whereParts.push(
+                `(sc.first_name ILIKE $${idx} OR sc.last_name ILIKE $${idx} OR sc.phone ILIKE $${idx})`
+            );
+            params.push(like);
+            idx++;
+        }
+
+        const whereSql = "WHERE " + whereParts.join(" AND ");
+
+        // liczba wszystkich wyników
+        const countRes = await pool.query(
+            `SELECT COUNT(*) AS total FROM salon_clients sc ${whereSql}`,
+            params
         );
 
-        const row = insertRes.rows[0];
+        const total = Number(countRes.rows[0]?.total || 0);
+
+        // właściwa lista klientów
+        const listRes = await pool.query(
+            `
+            SELECT
+                sc.id,
+                sc.employee_id,
+                sc.first_name,
+                sc.last_name,
+                sc.phone,
+                sc.created_at,
+                sc.first_appointment_id
+            FROM salon_clients sc
+            ${whereSql}
+            ORDER BY sc.created_at DESC
+            LIMIT $${idx} OFFSET $${idx + 1}
+            `,
+            [...params, lim, offset]
+        );
 
         res.json({
-            client: {
-                id: row.id,
-                first_name: row.first_name,
-                last_name: row.last_name,
-                phone: row.phone || "",
-            },
+            items: listRes.rows,
+            total,
+            page: pageNum,
+            limit: lim,
         });
     })
 );
+app.get(
+    "/api/clients/:id",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const clientLocalId = Number(req.params.id);
+
+        if (!clientLocalId) {
+            return res.status(400).json({ error: "Nieprawidłowe id klienta" });
+        }
+
+        // 1) POBIERAMY DANE KLIENTA
+        const clientRes = await pool.query(
+            `
+            SELECT
+                sc.*,
+                u.email
+            FROM salon_clients sc
+            LEFT JOIN users u ON u.uid = sc.client_uid
+            WHERE sc.id = $1
+            `,
+            [clientLocalId]
+        );
+
+        if (!clientRes.rows.length) {
+            return res.status(404).json({ error: "Klient nie istnieje" });
+        }
+
+        const client = clientRes.rows[0];
+        const salonId = client.salon_id;     // <<< już poprawnie istnieje
+        const clientUid = client.client_uid || null;
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        // 2) NADCHODZĄCE WIZYTY (Z ADDONS)
+        const upcomingRes = await pool.query(
+            `
+            SELECT 
+                a.*,
+                e.name AS employee_name,
+                s.name AS service_name,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'addon_id', sa.id,
+                            'addon_name', sa.name,
+                            'addon_price', sa.price,
+                            'addon_duration', sa.duration_minutes
+                        )
+                    ) FILTER (WHERE sa.id IS NOT NULL),
+                    '[]'
+                ) AS addons
+            FROM appointments a
+            JOIN employees e ON e.id = a.employee_id
+            JOIN services  s ON s.id = a.service_id
+            LEFT JOIN appointment_addons aa ON aa.appointment_id = a.id
+            LEFT JOIN service_addons sa ON aa.addon_id = sa.id
+            WHERE a.salon_id = $1
+              AND (
+                    a.client_local_id = $2
+                    OR ($3::text IS NOT NULL AND a.client_uid = $3)
+                  )
+              AND a.status = 'booked'
+              AND a.date >= $4::date
+            GROUP BY a.id, e.name, s.name
+            ORDER BY a.date ASC, a.start_time ASC
+            `,
+            [salonId, clientLocalId, clientUid, today]
+        );
+
+        // 3) ZAKOŃCZONE WIZYTY (Z ADDONS)
+        const pastRes = await pool.query(
+            `
+            SELECT 
+                a.*,
+                e.name AS employee_name,
+                s.name AS service_name,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'addon_id', sa.id,
+                            'addon_name', sa.name,
+                            'addon_price', sa.price,
+                            'addon_duration', sa.duration_minutes
+                        )
+                    ) FILTER (WHERE sa.id IS NOT NULL),
+                    '[]'
+                ) AS addons
+            FROM appointments a
+            JOIN employees e ON e.id = a.employee_id
+            JOIN services  s ON s.id = a.service_id
+            LEFT JOIN appointment_addons aa ON aa.appointment_id = a.id
+            LEFT JOIN service_addons sa ON aa.addon_id = sa.id
+            WHERE a.salon_id = $1
+              AND (
+                    a.client_local_id = $2
+                    OR ($3::text IS NOT NULL AND a.client_uid = $3)
+                  )
+              AND (
+                   a.date < $4::date
+                OR a.status IN ('completed', 'cancelled', 'no_show')
+                  )
+            GROUP BY a.id, e.name, s.name
+            ORDER BY a.date DESC, a.start_time DESC
+            LIMIT 50
+            `,
+            [salonId, clientLocalId, clientUid, today]
+        );
+
+        // 4) ODPOWIEDŹ
+        res.json({
+            client: {
+                id: client.id,
+                salon_id: client.salon_id,
+                employee_id: client.employee_id,
+                client_uid: client.client_uid,
+                first_name: client.first_name,
+                last_name: client.last_name,
+                phone: client.phone,
+                email: client.email || null,
+                created_at: client.created_at,
+                first_appointment_id: client.first_appointment_id,
+            },
+            upcoming_appointments: upcomingRes.rows,
+            past_appointments: pastRes.rows,
+        });
+    })
+);
+
+
+
+
 
 
 

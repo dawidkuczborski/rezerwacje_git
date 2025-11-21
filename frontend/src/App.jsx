@@ -30,7 +30,8 @@ import ChooseSalon from "./pages/ChooseSalon";
 // Panel pracownika
 import EmployeeCalendar from "./pages/employee/EmployeeCalendar";
 import EmployeeCalendarMonthView from "./pages/employee/EmployeeCalendarMonthView";
-
+import Vacations from "./pages/employee/Vacations";
+import Clients from "./pages/employee/Clients";
 function AppRoutes() {
     const { firebaseUser, backendUser, loading } = useAuth();
 
@@ -273,6 +274,27 @@ function AppRoutes() {
                 element={
                     isLoggedIn && backendUser?.role === "employee" ? (
                         <EmployeeCalendar />
+                    ) : (
+                        <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+
+            <Route
+                path="/employee/vacations"
+                element={
+                    isLoggedIn && backendUser?.role === "employee" ? (
+                        <Vacations />
+                    ) : (
+                        <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+            <Route
+                path="/employee/clients"
+                element={
+                    isLoggedIn && backendUser?.role === "employee" ? (
+                        <Clients />
                     ) : (
                         <Navigate to={redirectByRole()} replace />
                     )
