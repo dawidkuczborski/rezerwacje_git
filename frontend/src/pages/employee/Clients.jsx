@@ -65,7 +65,7 @@ export default function Clients() {
         setLoading(true);
         const token = await firebaseUser.getIdToken();
 
-        const url = new URL(`${backend}/api/clients`);
+        const url = `${backend}/api/clients`;
         url.searchParams.set("salon_id", salonId);
         url.searchParams.set("page", page);
         url.searchParams.set("limit", limit);
