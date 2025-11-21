@@ -82,7 +82,12 @@ export default function Vacations() {
 
         const token = await firebaseUser.getIdToken();
 
-        const url = new URL(`${backend}/api/vacations/list`);
+        const baseUrl = backend
+            ? `${backend}/api/vacations/list`
+            : `/api/vacations/list`;
+
+        const url = new URL(baseUrl, window.location.origin);
+
         url.searchParams.set("year", year);
         url.searchParams.set("month", month);
         url.searchParams.set("page", page);
@@ -105,6 +110,7 @@ export default function Vacations() {
         setTotal(data.total);
         setLoading(false);
     };
+
 
     // INIT
     useEffect(() => {
