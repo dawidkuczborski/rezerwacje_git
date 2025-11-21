@@ -135,7 +135,7 @@ export default function Clients() {
     return (
         <div className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]">
             {/* HEADER */}
-            <div className="bg-[#e57b2c] dark:bg-[#b86422] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
+            <div className="bg-[#e57b2c] dark:bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
                 {!selectedClient && (
                     <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
                         <Users size={24} />
@@ -210,7 +210,7 @@ export default function Clients() {
                             {clients.length < total && (
                                 <button
                                     onClick={loadMore}
-                                    className="w-full bg-[#e57b2c] dark:bg-[#b86422] text-white rounded-full py-2.5 mt-2"
+                                    className="w-full bg-[#e57b2c] dark:bg-[#e57b2c] text-white rounded-full py-2.5 mt-2"
                                 >
                                     {loading ? "Ładowanie..." : "Pokaż więcej"}
                                 </button>
@@ -238,7 +238,7 @@ export default function Clients() {
                         <div className="flex gap-3 mt-5">
                             <a
                                 href={`sms:${selectedClient.client.phone}`}
-                                className="flex-1 bg-[#e57b2c] dark:bg-[#b86422] text-white py-3 rounded-2xl flex items-center justify-center gap-2 font-medium"
+                                className="flex-1 bg-[#e57b2c] dark:bg-[#e57b2c] text-white py-3 rounded-2xl flex items-center justify-center gap-2 font-medium"
                             >
                                 <MessageCircle size={18} /> SMS
                             </a>

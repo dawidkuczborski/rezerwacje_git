@@ -1126,6 +1126,98 @@ useEffect(() => {
     };
   }, [setActiveDay]);
 
+
+
+
+
+
+    useEffect(() => {
+        let startX = 0;
+        let startY = 0;
+        let startTime = 0;
+
+        let isTouch = false;
+        let isScrollingVertically = false;
+
+        const distanceThreshold = 200;   // OGROMNY dystans
+        const verticalBlock = 30;        // mały ruch w pionie kasuje swipe
+        const speedThreshold = 1.0;      // bardzo szybki ruch ("flick")
+
+        function onTouchStart(e) {
+            if (editingEventId !== null || resizing.current) return;
+
+            isTouch = true;
+            isScrollingVertically = false;
+
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startTime = performance.now();
+        }
+
+        function onTouchMove(e) {
+            if (!isTouch) return;
+
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+
+            if (Math.abs(dy) > verticalBlock) {
+                isScrollingVertically = true;
+                return;
+            }
+
+            if (isScrollingVertically) return;
+
+            const timeElapsed = performance.now() - startTime;
+            const speed = Math.abs(dx) / timeElapsed;
+
+            const strongSwipe =
+                Math.abs(dx) > distanceThreshold || speed > speedThreshold;
+
+            if (!strongSwipe) return;
+
+            if (dx < 0) {
+                setActiveDay(prev => {
+                    const d = new Date(prev);
+                    d.setDate(prev.getDate() + 1);
+                    return d;
+                });
+            } else {
+                setActiveDay(prev => {
+                    const d = new Date(prev);
+                    d.setDate(prev.getDate() - 1);
+                    return d;
+                });
+            }
+
+            isTouch = false;
+        }
+
+        function onTouchEnd() {
+            isTouch = false;
+        }
+
+        const area = document.getElementById("employee-calendar-page");
+        if (!area) return;
+
+        area.addEventListener("touchstart", onTouchStart, { passive: true });
+        area.addEventListener("touchmove", onTouchMove, { passive: true });
+        area.addEventListener("touchend", onTouchEnd, { passive: true });
+
+        return () => {
+            area.removeEventListener("touchstart", onTouchStart);
+            area.removeEventListener("touchmove", onTouchMove);
+            area.removeEventListener("touchend", onTouchEnd);
+        };
+    }, [editingEventId]);
+
+
+
+
+
+
+
+
+
   const handleDrop = useCallback(
     async ({ id, fromEmployeeId, toEmployeeId, start_time, end_time, date, dragMode = false }) => {
       console.group("🎯 DROP EVENT — handleDrop()");

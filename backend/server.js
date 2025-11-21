@@ -1289,7 +1289,7 @@ app.get(
 
             console.log("✔ Finalnie używamy salon_id:", salonId);
 
-            
+
             // ----------------------------------------------------
             // ⛔️ BLOKADA LOGOWANIA (employee / provider)
             // ----------------------------------------------------
@@ -1371,7 +1371,7 @@ app.get(
 
 
 
-            
+
 
 
             // ----------------------------------------------------
@@ -1528,50 +1528,89 @@ app.put(
                 return res.status(401).json({ error: "Brak autoryzacji" });
 
             if (!date)
-                return res
-                    .status(400)
-                    .json({ error: "Brak daty — nie można zapisać zmiany" });
+                return res.status(400).json({ error: "Brak daty — nie można zapisać zmiany" });
 
-            // 🔹 Znajdź salon pracownika
-            const salonRes = await pool.query(
-                "SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1",
+
+            /* --------------------------------------------------------------
+               1️⃣ Rozpoznanie użytkownika (EMPLOYEE lub PROVIDER)
+               — TAKA SAMA LOGIKA jak w GET /api/calendar/shared
+            --------------------------------------------------------------- */
+
+            let salonId = null;
+            let isEmployee = false;
+
+            // Czy to employee?
+            const empRes = await pool.query(
+                "SELECT id, salon_id FROM employees WHERE uid=$1 LIMIT 1",
                 [uid]
             );
-            if (salonRes.rows.length === 0)
-                return res
-                    .status(404)
-                    .json({ error: "Nie znaleziono przypisanego salonu" });
 
-            const salonId = salonRes.rows[0].salon_id;
+            if (empRes.rows.length > 0) {
+                isEmployee = true;
+                salonId = empRes.rows[0].salon_id;
 
-            // 🔹 Sprawdź, czy wizyta należy do salonu
+                // Employee może zmieniać TYLKO swoje salony
+            } else {
+                // Provider → pobierz salony
+                const providerSalonRes = await pool.query(
+                    "SELECT id FROM salons WHERE owner_uid=$1",
+                    [uid]
+                );
+
+                const allowedSalons = providerSalonRes.rows.map((r) => r.id);
+
+                // Pobierz salon wizyty
+                const apptSalon = await pool.query(
+                    "SELECT salon_id FROM appointments WHERE id=$1",
+                    [id]
+                );
+
+                if (apptSalon.rows.length === 0)
+                    return res.status(404).json({ error: "Nie znaleziono wizyty" });
+
+                const apptSalonId = apptSalon.rows[0].salon_id;
+
+                if (!allowedSalons.includes(apptSalonId)) {
+                    return res.status(403).json({
+                        error: "Provider nie ma dostępu do tego salonu"
+                    });
+                }
+
+                salonId = apptSalonId;
+            }
+
+
+            /* --------------------------------------------------------------
+               2️⃣ Sprawdzenie czy wizyta istnieje w tym salonie
+            --------------------------------------------------------------- */
+
             const check = await pool.query(
                 "SELECT * FROM appointments WHERE id=$1 AND salon_id=$2",
                 [id, salonId]
             );
-            if (check.rows.length === 0)
-                return res
-                    .status(404)
-                    .json({ error: "Nie znaleziono wizyty w tym salonie" });
 
-            // 🔹 Sprawdzenie konfliktu wizyt
+            if (check.rows.length === 0)
+                return res.status(404).json({ error: "Nie znaleziono wizyty w tym salonie" });
+
+
+            /* --------------------------------------------------------------
+               3️⃣ Sprawdzenie konfliktów
+            --------------------------------------------------------------- */
             if (!force) {
                 const conflict = await pool.query(
                     `SELECT 
-  a.id, u.name AS client_name, s.name AS service_name
-FROM appointments a
-LEFT JOIN users u ON a.client_uid=u.uid
-LEFT JOIN services s ON a.service_id=s.id
-WHERE a.employee_id=$1
-  AND a.date=$2
-  AND a.status NOT IN ('cancelled')
-
-  AND a.id::text!=$5::text
-  AND ((a.start_time, a.end_time) OVERLAPS ($3::time, $4::time))
-
-`,
+                      a.id, u.name AS client_name, s.name AS service_name
+                     FROM appointments a
+                     LEFT JOIN users u ON a.client_uid=u.uid
+                     LEFT JOIN services s ON a.service_id=s.id
+                     WHERE a.employee_id=$1
+                       AND a.date=$2
+                       AND a.status!='cancelled'
+                       AND a.id::text!=$5::text
+                       AND ((a.start_time, a.end_time) OVERLAPS ($3::time, $4::time))`,
                     [employee_id, date, start_time, end_time, id]
                 );
+
                 if (conflict.rows.length > 0)
                     return res.status(409).json({
                         error: "Termin koliduje z inną wizytą tego pracownika",
@@ -1579,16 +1618,18 @@ WHERE a.employee_id=$1
                     });
             }
 
-            // 🔹 Aktualizuj termin
+
+            /* --------------------------------------------------------------
+               4️⃣ Aktualizacja wizyty
+            --------------------------------------------------------------- */
+
             const updated = await pool.query(
                 `UPDATE appointments
-         SET employee_id=$1, date=$2, start_time=$3, end_time=$4, changed_at=NOW()
-         WHERE id=$5 AND salon_id=$6
-         RETURNING *`,
+                 SET employee_id=$1, date=$2, start_time=$3, end_time=$4, changed_at=NOW()
+                 WHERE id=$5 AND salon_id=$6
+                 RETURNING *`,
                 [employee_id, date, start_time, end_time, id, salonId]
             );
-            if (updated.rowCount === 0)
-                return res.status(404).json({ error: "Nie udało się zaktualizować" });
 
             io.emit("calendar_updated", {
                 type: "update",
@@ -1601,12 +1642,14 @@ WHERE a.employee_id=$1
                 message: "✅ Termin zaktualizowany",
                 appointment: updated.rows[0],
             });
+
         } catch (error) {
             console.error("❌ Błąd PUT /api/calendar/shared/:id:", error);
             res.status(500).json({ error: error.message });
         }
     })
 );
+
 // ✅ Szczegóły wizyty (dla modala edycji)
 app.get(
     "/api/appointments/:id/details",
@@ -1618,7 +1661,16 @@ app.get(
         const apptRes = await pool.query(
             `
       SELECT 
-        a.*, 
+    a.id,
+    to_char(a.date, 'YYYY-MM-DD') AS date,
+    a.start_time,
+    a.end_time,
+    a.service_id,
+    a.employee_id,
+    a.client_uid,
+    a.client_local_id,
+    a.changed_at,
+ 
 
         -- 👇 NAZWA KLIENTA: najpierw z users, jeśli nie ma to z salon_clients
         COALESCE(
@@ -1950,18 +2002,6 @@ app.get(
         return res.status(403).json({ error: "Brak uprawnień" });
     })
 );
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 app.post(
@@ -3621,39 +3661,132 @@ app.get(
 
 
 
+app.put(
+    "/api/vacations/:id",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const id = req.params.id;
+        const { start_date, end_date, reason } = req.body;
+        const uid = req.user?.uid;
+
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        // 1️⃣ Pobierz urlop
+        const vacationRes = await pool.query(
+            `SELECT employee_id FROM employee_vacations WHERE id = $1`,
+            [id]
+        );
+
+        if (vacationRes.rowCount === 0) {
+            return res.status(404).json({ error: "Urlop nie istnieje" });
+        }
+
+        const vacation = vacationRes.rows[0];
+
+        // 2️⃣ Pobierz użytkownika
+        const userRes = await pool.query(
+            `SELECT is_provider FROM users WHERE uid = $1 LIMIT 1`,
+            [uid]
+        );
+
+        if (userRes.rowCount === 0) {
+            return res.status(403).json({ error: "Brak użytkownika" });
+        }
+
+        const isProvider = userRes.rows[0].is_provider === true;
+
+        // 3️⃣ Jeśli PROVIDER → OK
+        if (!isProvider) {
+            // 4️⃣ Jeśli EMPLOYEE → sprawdź czy urlop należy do niego
+            const empRes = await pool.query(
+                `SELECT id FROM employees WHERE uid = $1 LIMIT 1`,
+                [uid]
+            );
+
+            if (empRes.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Brak przypisanego pracownika"
+                });
+            }
+
+            const employeeId = empRes.rows[0].id;
+
+            if (employeeId !== vacation.employee_id) {
+                return res.status(403).json({
+                    error: "Nie masz uprawnień do edytowania tego urlopu"
+                });
+            }
+        }
+
+        // 5️⃣ Zapis aktualizacji
+        await pool.query(
+            `UPDATE employee_vacations
+             SET start_date = $1, end_date = $2, reason = $3
+             WHERE id = $4`,
+            [start_date, end_date, reason, id]
+        );
+
+        res.json({ success: true, message: "Urlop zaktualizowany" });
+    })
+);
 app.delete(
     "/api/vacations/:id",
     verifyToken,
-    requireProviderRole,
     asyncHandler(async (req, res) => {
         const id = req.params.id;
+        const uid = req.user?.uid;
 
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        // 1️⃣ Pobierz urlop
+        const vacationRes = await pool.query(
+            `SELECT employee_id FROM employee_vacations WHERE id = $1`,
+            [id]
+        );
+
+        if (vacationRes.rowCount === 0) {
+            return res.status(404).json({ error: "Urlop nie istnieje" });
+        }
+
+        const vacation = vacationRes.rows[0];
+
+        // 2️⃣ Pobierz użytkownika
+        const userRes = await pool.query(
+            `SELECT is_provider FROM users WHERE uid = $1 LIMIT 1`,
+            [uid]
+        );
+
+        const isProvider = userRes.rows[0].is_provider === true;
+
+        // 3️⃣ Jeśli nie provider → sprawdzamy właściciela urlopu
+        if (!isProvider) {
+            const empRes = await pool.query(
+                `SELECT id FROM employees WHERE uid = $1 LIMIT 1`,
+                [uid]
+            );
+
+            if (empRes.rowCount === 0) {
+                return res.status(403).json({
+                    error: "Brak przypisanego pracownika"
+                });
+            }
+
+            const employeeId = empRes.rows[0].id;
+
+            if (employeeId !== vacation.employee_id) {
+                return res.status(403).json({
+                    error: "Nie masz uprawnień do usunięcia tego urlopu"
+                });
+            }
+        }
+
+        // 4️⃣ Usuń
         await pool.query(
             `DELETE FROM employee_vacations WHERE id = $1`,
             [id]
         );
 
-        res.json({ message: "Urlop usunięty" });
-    })
-);
-app.put(
-    "/api/vacations/:id",
-    verifyToken,
-    requireProviderRole,
-    asyncHandler(async (req, res) => {
-        const id = req.params.id;
-        const { start_date, end_date, reason } = req.body;
-
-        await pool.query(
-            `
-            UPDATE employee_vacations
-            SET start_date = $1, end_date = $2, reason = $3
-            WHERE id = $4
-        `,
-            [start_date, end_date, reason, id]
-        );
-
-        res.json({ message: "Urlop zaktualizowany" });
+        res.json({ success: true, message: "Urlop usunięty" });
     })
 );
 

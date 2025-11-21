@@ -42,6 +42,18 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         headers: { Authorization: `Bearer ${localStorage.getItem("authToken")}` },
     });
 
+    // -------------------------
+    // FIX — lokalna data (usuwa cofanie UTC)
+    // -------------------------
+    const toLocalDate = (d) => {
+        if (!d) return "";
+        const date = new Date(d);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    };
+
     const normalizeClients = (list) => {
         const filtered = (list || []).filter(
             (c) => c && c.id && (c.first_name || c.last_name || c.phone)
@@ -51,7 +63,9 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         return [...unique.values()];
     };
 
+    // -------------------------
     // LOAD DATA
+    // -------------------------
     useEffect(() => {
         if (!open) return;
 
@@ -67,8 +81,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     }
                 );
 
-
-
                 setClients(normalizeClients(res.data.clients || []));
                 setEmployees(res.data.employees || []);
                 setServices(res.data.services || []);
@@ -78,11 +90,10 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     setForm((prev) => ({
                         ...prev,
                         date: activeDay
-                            ? activeDay.toISOString().split("T")[0]
-                            : new Date().toISOString().split("T")[0],
+                            ? toLocalDate(activeDay)
+                            : toLocalDate(new Date()),
                     }));
                 }
-
 
             } catch (err) {
                 console.error("LOAD ERROR:", err);
@@ -92,7 +103,9 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         load();
     }, [open]);
 
-    // PREFILL przy UMÓW PONOWNIE
+    // -------------------------
+    // PREFILL (umów ponownie)
+    // -------------------------
     useEffect(() => {
         if (!open || !prefill) return;
 
@@ -105,13 +118,19 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         }));
     }, [open, prefill]);
 
-
+    // -------------------------
     // FETCH SLOTS
+    // -------------------------
     const fetchSlots = async (empId, srvId, date, addonList) => {
         if (!empId || !srvId || !date) return setAvailableTimes([]);
 
         try {
-            const params = { employee_id: empId, service_id: srvId, date };
+            const params = {
+                employee_id: empId,
+                service_id: srvId,
+                date: toLocalDate(date), // FIX
+            };
+
             if (addonList?.length) params.addons = addonList.join(",");
 
             const res = await axios.get(
@@ -124,7 +143,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     }
                 }
             );
-
 
             setAvailableTimes(
                 (res.data?.slots || []).map((s) => ({
@@ -139,6 +157,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                     : `🛌 ${s.start_time} – ${s.end_time} (wolne)`,
                 }))
             );
+
         } catch {
             setAvailableTimes([]);
         }
@@ -148,7 +167,9 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         fetchSlots(form.employee_id, form.service_id, form.date, form.addons);
     }, [form.employee_id, form.service_id, form.date, JSON.stringify(form.addons)]);
 
+    // -------------------------
     // ADD CLIENT
+    // -------------------------
     const handleCreateClient = async () => {
         const { first_name, last_name, phone } = newClient;
 
@@ -169,7 +190,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 }
             );
 
-
             const created = res.data?.client;
 
             if (created?.id) {
@@ -179,14 +199,16 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 setNewClient({ first_name: "", last_name: "", phone: "" });
             }
         } catch (err) {
-            console.error("Błąd dodawania klienta:", err?.response?.data || err);
+            console.error("Błąd dodawania klienta:", err);
             alert("Błąd podczas dodawania klienta");
         } finally {
             setCreatingClient(false);
         }
     };
 
+    // -------------------------
     // SAVE
+    // -------------------------
     const handleSave = async () => {
         if (!form.client_id || !form.employee_id || !form.service_id || !form.start_time) {
             alert("Uzupełnij obowiązkowe pola!");
@@ -198,13 +220,16 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         try {
             await axios.post(
                 `${backendBase}/api/appointments/create-from-panel`,
-                { ...form, client_local_id: form.client_id },
+                {
+                    ...form,
+                    date: toLocalDate(form.date),  // FIX
+                    client_local_id: form.client_id
+                },
                 {
                     ...authHeaders(),
                     params: { salon_id: localStorage.getItem("selected_salon_id") }
                 }
             );
-
 
             setSavedPopup(true);
 
@@ -213,15 +238,18 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 onClose();
                 onCreated?.();
             }, 900);
+
         } catch (err) {
-            console.error("Błąd tworzenia wizyty:", err?.response?.data || err);
+            console.error("Błąd tworzenia wizyty:", err);
             alert("Nie udało się utworzyć wizyty");
         } finally {
             setSaving(false);
         }
     };
 
-    // Close dropdown on outside-click
+    // -------------------------
+    // close dropdown on click outside
+    // -------------------------
     useEffect(() => {
         const handler = (e) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -244,6 +272,9 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
     if (!open) return null;
 
+    // --------------------------------------------------------------
+    // RENDER
+    // --------------------------------------------------------------
     return (
         <AnimatePresence>
             <motion.div
@@ -255,7 +286,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                     initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
                     onClick={(e) => e.stopPropagation()}
                     className="w-full h-full max-w-3xl bg-white dark:bg-gray-900 dark:text-gray-100
-          rounded-none md:rounded-2xl overflow-y-auto shadow-xl flex flex-col"
+                        rounded-none md:rounded-2xl overflow-y-auto shadow-xl flex flex-col"
                 >
                     {/* SUCCESS POPUP */}
                     {savedPopup && (
@@ -287,8 +318,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                     ? (() => {
                                         const c = clients.find((x) => x.id === form.client_id);
                                         return c
-                                            ? `${c.first_name || ""} ${c.last_name || ""}${c.phone ? ` – ${c.phone}` : ""
-                                            }`
+                                            ? `${c.first_name || ""} ${c.last_name || ""}${c.phone ? ` – ${c.phone}` : ""}`
                                             : "Wybierz klienta...";
                                     })()
                                     : "Wybierz klienta..."}
@@ -391,10 +421,12 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                         </div>
 
                         {/* EMPLOYEE */}
-                        <div className="border-b pb-4 dark:border-gray-700">
-                            <label className="text-sm text-gray-500 dark:text-gray-400">Pracownik *</label>
+                        <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
+                            <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Pracownik *</label>
+
                             <select
-                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
+                                className="mt-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3"
+                                style={{ width: "350px", height: "48px" }}
                                 value={form.employee_id}
                                 onChange={(e) =>
                                     setForm({ ...form, employee_id: Number(e.target.value) })
@@ -409,11 +441,14 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </select>
                         </div>
 
+
                         {/* SERVICE */}
-                        <div className="border-b pb-4 dark:border-gray-700">
-                            <label className="text-sm text-gray-500 dark:text-gray-400">Usługa *</label>
+                        <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
+                            <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Usługa *</label>
+
                             <select
-                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
+                                className="mt-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3"
+                                style={{ width: "350px", height: "48px" }}
                                 value={form.service_id}
                                 onChange={(e) =>
                                     setForm({ ...form, service_id: Number(e.target.value) })
@@ -428,10 +463,12 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </select>
                         </div>
 
+
                         {/* ADDONS */}
-                        <div className="border-b pb-4 dark:border-gray-700">
-                            <label className="text-sm text-gray-500 dark:text-gray-400">Dodatki</label>
-                            <div className="mt-2 space-y-1">
+                        <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
+                            <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Dodatki</label>
+
+                            <div className="mt-2 space-y-1 self-start">
                                 {addons
                                     .filter((a) => !a.service_id || a.service_id === form.service_id)
                                     .map((a) => (
@@ -454,22 +491,28 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </div>
                         </div>
 
+
                         {/* DATE */}
-                        <div className="border-b pb-4 dark:border-gray-700">
-                            <label className="text-sm text-gray-500 dark:text-gray-400">Data *</label>
+                        <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
+                            <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Data *</label>
+
                             <input
                                 type="date"
-                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
-                                value={form.date}
+                                className="mt-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3"
+                                style={{ width: "350px", height: "48px" }}
+                                value={toLocalDate(form.date)}
                                 onChange={(e) => setForm({ ...form, date: e.target.value })}
                             />
                         </div>
 
+
                         {/* TIME */}
-                        <div className="border-b pb-4 dark:border-gray-700">
-                            <label className="text-sm text-gray-500 dark:text-gray-400">Godzina *</label>
+                        <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
+                            <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Godzina *</label>
+
                             <select
-                                className="mt-2 w-full border rounded-lg p-2 dark:bg-gray-800 dark:border-gray-700"
+                                className="mt-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg px-3"
+                                style={{ width: "350px", height: "48px" }}
                                 value={form.start_time}
                                 onChange={(e) => {
                                     const slot = availableTimes.find((s) => s.start_time === e.target.value);
@@ -489,6 +532,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                 ))}
                             </select>
                         </div>
+
                     </div>
 
                     {/* FOOTER */}
@@ -505,12 +549,12 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             onClick={handleSave}
                             disabled={saving}
                             className={`
-                px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
-                ${saving
+                                px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
+                                ${saving
                                     ? "bg-gray-400 cursor-not-allowed"
                                     : "bg-orange-500 hover:bg-orange-600"
                                 }
-              `}
+                            `}
                         >
                             {saving ? "Zapisywanie..." : (
                                 <>

@@ -85,3 +85,33 @@ html {
     display: none !important;
   }
 }
+
+
+
+/* ===============================
+   iOS FIX — normalne inputy date/time
+   =============================== */
+.ios-input {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    background-color: inherit !important;
+    color: inherit !important;
+    border-radius: 16px !important;
+    height: 48px !important;
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+    font-size: 16px !important;
+    line-height: 48px !important;
+    display: flex;
+    align-items: center;
+}
+
+/* iOS Safari — ogarnia ikonę wyboru daty/czasu */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+    opacity: 0.7;
+    filter: invert(0.6);
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+}

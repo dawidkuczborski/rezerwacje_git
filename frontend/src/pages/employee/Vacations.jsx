@@ -152,7 +152,7 @@ export default function Vacations() {
     return (
         <div className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]">
             {/* HEADER */}
-            <div className="bg-[#e57b2c] dark:bg-[#b86422] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
+            <div className="bg-[#e57b2c] dark:bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
                 <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
                     <CalendarDays size={24} />
                     Urlopy
@@ -208,7 +208,7 @@ export default function Vacations() {
                         {/* ADD BUTTON */}
                         <button
                             onClick={() => setOpenAdd(true)}
-                            className="w-full bg-[#e57b2c] dark:bg-[#b86422] text-white rounded-2xl py-3 flex items-center justify-center gap-2 text-[15px] font-medium"
+                            className="w-full bg-[#e57b2c] dark:bg-[#e57b2c] text-white rounded-2xl py-3 flex items-center justify-center gap-2 text-[15px] font-medium"
                         >
                             <Plus size={18} />
                             Dodaj urlop
@@ -265,7 +265,7 @@ export default function Vacations() {
                                         <Pencil size={16} />
                                     </button>
 
-                                    
+
                                 </div>
                             </motion.div>
                         ))}
@@ -274,7 +274,7 @@ export default function Vacations() {
                         {vacations.length < total && (
                             <button
                                 onClick={loadMore}
-                                className="w-full bg-[#e57b2c] dark:bg-[#b86422] text-white rounded-full py-2.5 mt-2"
+                                className="w-full bg-[#e57b2c] dark:bg-[#e57b2c] text-white rounded-full py-2.5 mt-2"
                             >
                                 {loading ? "Ładowanie..." : "Pokaż więcej"}
                             </button>

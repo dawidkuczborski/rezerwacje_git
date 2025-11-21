@@ -123,7 +123,7 @@ export default function Login() {
 
                 if (salons.length === 1) {
                     localStorage.setItem("selected_salon_id", salons[0].id);
-                    window.location.href = "/panel";
+                    window.location.href = "/employee/calendar";
                     return;
                 }
 

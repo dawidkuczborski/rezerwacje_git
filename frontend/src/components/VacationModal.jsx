@@ -32,17 +32,13 @@ export default function VacationModal({ open, onClose, onAdded }) {
                 const res = await axios.get(`${backendBase}/api/vacations/init`, {
                     headers: { Authorization: `Bearer ${token}` },
                     params: {
-                        salon_id: localStorage.getItem("selected_salon_id"), // 🔥 TU DODANE
+                        salon_id: localStorage.getItem("selected_salon_id"),
                     }
                 });
 
-                console.log("Vacation init response:", res.data);
-
-                // PROVIDER
                 if (res.data.is_provider) {
                     setIsProvider(true);
 
-                    // scal pracowników wszystkich salonów w jedną listę
                     const merged = res.data.salons.flatMap((s) =>
                         s.employees.map((e) => ({
                             id: e.id,
@@ -51,18 +47,14 @@ export default function VacationModal({ open, onClose, onAdded }) {
                         }))
                     );
 
-                    console.log("Provider employees merged:", merged);
-
                     setEmployees(merged);
 
                     if (merged.length > 0) {
                         setVacation((v) => ({ ...v, employee_id: merged[0].id }));
                     }
-
                     return;
                 }
 
-                // EMPLOYEE
                 const list = res.data.employees || [];
                 setEmployees(list);
                 setIsProvider(false);
@@ -70,14 +62,13 @@ export default function VacationModal({ open, onClose, onAdded }) {
                 if (list.length === 1) {
                     setVacation((v) => ({ ...v, employee_id: list[0].id }));
                 }
-
             } catch (err) {
                 console.error("Vacation init error:", err);
             }
         };
 
         load();
-    }, [open, firebaseUser, backendBase]);
+    }, [open, firebaseUser]);
 
     const handleSave = async () => {
         if (!vacation.employee_id || !vacation.start_date || !vacation.end_date) {
@@ -113,55 +104,61 @@ export default function VacationModal({ open, onClose, onAdded }) {
 
     return (
         <AnimatePresence>
-            {open && (
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-end"
+                onClick={onClose}
+            >
                 <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center"
-                    onClick={onClose}
+                    initial={{ y: 80 }}
+                    animate={{ y: 0 }}
+                    exit={{ y: 80 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full h-[100dvh] bg-white dark:bg-[#1a1a1a] overflow-y-auto shadow-xl flex flex-col"
+
                 >
-                    <motion.div
-                        initial={{ y: 50, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        exit={{ y: 50, opacity: 0 }}
-                        transition={{ duration: 0.3 }}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full h-full max-w-md bg-white dark:bg-gray-900 dark:text-gray-100 rounded-none md:rounded-2xl overflow-y-auto shadow-2xl flex flex-col"
-                    >
-                        {/* Toast */}
-                        <AnimatePresence>
-                            {savedPopup && (
-                                <motion.div
-                                    initial={{ opacity: 0, y: -10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -10 }}
-                                    className="absolute top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg"
-                                >
-                                    <CheckCircle size={16} /> Zapisano!
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
 
-                        {/* HEADER */}
-                        <div className="sticky top-0 bg-gradient-to-r from-orange-500 to-orange-400 text-white px-6 py-4 flex justify-between items-center shadow-md z-10">
-                            <h2 className="text-lg font-semibold">Dodaj urlop</h2>
-
-                            <button
-                                onClick={onClose}
-                                className="p-2 rounded-lg hover:bg-white/20 transition"
+                    {/* Toast */}
+                    <AnimatePresence>
+                        {savedPopup && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -8 }}
+                                className="absolute top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-2xl flex items-center gap-2 shadow-xl z-20"
                             >
-                                <X size={18} />
-                            </button>
-                        </div>
+                                <CheckCircle size={16} />
+                                Zapisano!
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
-                        {/* CONTENT */}
-                        <div className="flex-1 p-6 space-y-6 text-gray-800 dark:text-gray-100">
+                    {/* HEADER — nowy styl */}
+                    <div className="bg-[#e57b2c] dark:bg-[#b86422] px-6 pt-[calc(env(safe-area-inset-top)+22px)] pb-10 flex items-center justify-between text-white">
+                        <h2 className="text-[20px] font-semibold flex items-center gap-2">
+                            <Calendar size={22} />
+                            Dodaj urlop
+                        </h2>
 
-                            {/* EMPLOYEE SELECT */}
-                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                        <button
+                            onClick={onClose}
+                            className="p-2 hover:bg-white/20 rounded-xl transition"
+                        >
+                            <X size={22} />
+                        </button>
+                    </div>
+
+                    {/* WHITE CARD */}
+                    <div className="-mt-6 bg-white dark:bg-[#1a1a1a] rounded-t-[32px] px-6 py-6 space-y-8 flex-1 text-gray-800 dark:text-gray-100">
+
+                        {/* EMPLOYEE */}
+                        <div className="flex flex-col items-center space-y-6">
+
+                            <div className="flex flex-col">
                                 <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                    <User size={14} /> Pracownik
+                                    <User size={16} /> Pracownik
                                 </label>
 
                                 <select
@@ -173,15 +170,9 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                             employee_id: Number(e.target.value),
                                         }))
                                     }
-                                    className={`
-                                        mt-1 w-full border rounded-lg p-2
-                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                                        dark:bg-gray-800 dark:border-gray-700
-                                        ${!isProvider
-                                            ? "opacity-50 cursor-not-allowed bg-gray-100 dark:bg-gray-700"
-                                            : ""
-                                        }
-                                    `}
+                                    className="bg-white dark:bg-[#2a2a2a] border border-gray-300 dark:border-gray-700 
+                       rounded-2xl px-4 mt-1"
+                                    style={{ width: "350px", height: "48px" }}
                                 >
                                     <option value="">Wybierz...</option>
                                     {employees.map((e) => (
@@ -193,9 +184,9 @@ export default function VacationModal({ open, onClose, onAdded }) {
                             </div>
 
                             {/* START DATE */}
-                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                            <div className="flex flex-col">
                                 <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                    <Calendar size={14} /> Początek urlopu
+                                    <Calendar size={16} /> Początek urlopu
                                 </label>
 
                                 <input
@@ -204,18 +195,16 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, start_date: e.target.value }))
                                     }
-                                    className="
-                                        mt-1 w-full border rounded-lg p-2
-                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                                        dark:bg-gray-800 dark:border-gray-700
-                                    "
+                                    className="bg-white dark:bg-[#2a2a2a] border border-gray-300 
+                       dark:border-gray-700 rounded-2xl px-4 mt-1"
+                                    style={{ width: "350px", height: "48px" }}
                                 />
                             </div>
 
                             {/* END DATE */}
-                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                            <div className="flex flex-col">
                                 <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                    <Calendar size={14} /> Koniec urlopu
+                                    <Calendar size={16} /> Koniec urlopu
                                 </label>
 
                                 <input
@@ -224,18 +213,16 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, end_date: e.target.value }))
                                     }
-                                    className="
-                                        mt-1 w-full border rounded-lg p-2
-                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                                        dark:bg-gray-800 dark:border-gray-700
-                                    "
+                                    className="bg-white dark:bg-[#2a2a2a] border border-gray-300 
+                       dark:border-gray-700 rounded-2xl px-4 mt-1"
+                                    style={{ width: "350px", height: "48px" }}
                                 />
                             </div>
 
                             {/* REASON */}
-                            <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                            <div className="flex flex-col">
                                 <label className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                    <FileText size={14} /> Powód (opcjonalnie)
+                                    <FileText size={16} /> Powód (opcjonalnie)
                                 </label>
 
                                 <textarea
@@ -243,48 +230,40 @@ export default function VacationModal({ open, onClose, onAdded }) {
                                     onChange={(e) =>
                                         setVacation((v) => ({ ...v, reason: e.target.value }))
                                     }
-                                    placeholder="np. urlop wypoczynkowy"
-                                    className="
-                                        mt-1 w-full border rounded-lg p-2 h-24 resize-none
-                                        focus:ring-2 focus:ring-orange-400 dark:focus:ring-orange-500
-                                        dark:bg-gray-800 dark:border-gray-700
-                                    "
+                                    className="bg-white dark:bg-[#2a2a2a] border border-gray-300 
+                       dark:border-gray-700 rounded-2xl p-3 resize-none mt-1"
+                                    style={{ width: "350px" }}
+                                    rows={3}
                                 />
                             </div>
+
                         </div>
 
-                        {/* FOOTER */}
-                        <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 border-t dark:border-gray-700 flex justify-end gap-3 px-6 py-4">
-                            <button
-                                onClick={onClose}
-                                disabled={saving}
-                                className="
-                                    px-4 py-2 rounded-lg
-                                    bg-gray-200 hover:bg-gray-300
-                                    dark:bg-gray-700 dark:hover:bg-gray-600
-                                    disabled:opacity-50
-                                "
-                            >
-                                Anuluj
-                            </button>
+                    </div>
 
-                            <button
-                                onClick={handleSave}
-                                disabled={saving}
-                                className={`
-                                    px-4 py-2 rounded-lg text-white font-semibold flex items-center gap-2
-                                    ${saving
-                                        ? "bg-gray-400 cursor-not-allowed"
-                                        : "bg-orange-500 hover:bg-orange-600"
-                                    }
-                                `}
-                            >
-                                {saving ? "Zapisywanie..." : (<><Save size={16} /> Zapisz</>)}
-                            </button>
-                        </div>
-                    </motion.div>
+                    {/* FOOTER */}
+                    <div className="p-6 flex justify-end gap-3">
+                        <button
+                            onClick={onClose}
+                            disabled={saving}
+                            className="px-6 py-3 rounded-2xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 disabled:opacity-50"
+                        >
+                            Anuluj
+                        </button>
+
+                        <button
+                            onClick={handleSave}
+                            disabled={saving}
+                            className={`
+                                px-6 py-3 rounded-2xl text-white font-medium flex items-center gap-2
+                                ${saving ? "bg-gray-400 cursor-not-allowed" : "bg-[#e57b2c] hover:bg-[#cf6e27]"}
+                            `}
+                        >
+                            {saving ? "Zapisywanie..." : (<><Save size={18} /> Zapisz</>)}
+                        </button>
+                    </div>
                 </motion.div>
-            )}
+            </motion.div>
         </AnimatePresence>
     );
 }
