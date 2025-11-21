@@ -25,12 +25,11 @@ export default function Vacations() {
     const [selectedVacation, setSelectedVacation] = useState(null);
 
     const [isProvider, setIsProvider] = useState(false);
+
     const limit = 10;
     const salonId = localStorage.getItem("selected_salon_id");
 
-    const isDark = document.documentElement.classList.contains("dark");
-
-    // 🔧 Format daty PL
+    // FORMATOWANIE DATY
     const formatDate = (d) =>
         new Date(d).toLocaleDateString("pl-PL", {
             day: "numeric",
@@ -38,9 +37,9 @@ export default function Vacations() {
             year: "numeric",
         });
 
-    // -------------------------
-    // LOAD EMPLOYEES
-    // -------------------------
+    // ---------------------------------
+    // ŁADOWANIE PRACOWNIKÓW
+    // ---------------------------------
     const loadEmployees = async () => {
         if (!firebaseUser) return;
 
@@ -67,13 +66,15 @@ export default function Vacations() {
             setEmployees(merged);
         } else {
             setEmployees(data.employees);
-            setEmployeeFilter(data.employees[0].id);
+            if (data.employees?.length > 0) {
+                setEmployeeFilter(data.employees[0].id);
+            }
         }
     };
 
-    // -------------------------
-    // LOAD VACATIONS
-    // -------------------------
+    // ---------------------------------
+    // ŁADOWANIE URLOPÓW
+    // ---------------------------------
     const loadVacations = async (reset = false) => {
         if (!firebaseUser) return;
 
@@ -110,13 +111,13 @@ export default function Vacations() {
         loadEmployees();
     }, [firebaseUser]);
 
-    // Reload on filters change
+    // reload on filters
     useEffect(() => {
         setPage(1);
         loadVacations(true);
     }, [year, month, employeeFilter, isProvider]);
 
-    // Pagination
+    // pagination
     useEffect(() => {
         if (page > 1) loadVacations();
     }, [page]);
@@ -124,10 +125,6 @@ export default function Vacations() {
     const loadMore = () => {
         if (vacations.length < total) setPage((p) => p + 1);
     };
-
-    // -------------------------
-    // UI
-    // -------------------------
 
     const years = [2023, 2024, 2025, 2026];
 
@@ -147,147 +144,140 @@ export default function Vacations() {
     ];
 
     return (
-        <div
-            className={`min-h-screen px-5 py-8 font-sans ${isDark ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-900"
-                }`}
-        >
+        <div className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]">
             {/* HEADER */}
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-semibold flex items-center gap-2">
-                    <CalendarDays size={26} />
+            <div className="bg-[#e57b2c] dark:bg-[#b86422] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
+                <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
+                    <CalendarDays size={24} />
                     Urlopy
                 </h1>
-
-                <button
-                    onClick={() => setOpenAdd(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl shadow-md"
-                >
-                    <Plus size={18} />
-                    Dodaj
-                </button>
             </div>
 
-            {/* FILTERS */}
-            <div className="space-y-3 mb-6">
-                {isProvider && (
-                    <select
-                        value={employeeFilter}
-                        onChange={(e) => setEmployeeFilter(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 shadow-sm"
-                    >
-                        <option value="all">Wszyscy pracownicy</option>
-                        {employees.map((e) => (
-                            <option key={e.id} value={e.id}>
-                                {e.name}
-                            </option>
-                        ))}
-                    </select>
-                )}
-
-                <div className="flex gap-3">
-                    <select
-                        value={year}
-                        onChange={(e) => setYear(Number(e.target.value))}
-                        className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 shadow-sm"
-                    >
-                        {years.map((y) => (
-                            <option key={y} value={y}>
-                                {y}
-                            </option>
-                        ))}
-                    </select>
-
-                    <select
-                        value={month}
-                        onChange={(e) => setMonth(Number(e.target.value))}
-                        className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 shadow-sm"
-                    >
-                        {months.map((m) => (
-                            <option key={m.id} value={m.id}>
-                                {m.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-            </div>
-
-            {/* LISTA URLOPÓW */}
-            <div className="space-y-4">
-                {vacations.map((v, i) => (
-                    <motion.div
-                        key={v.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.25, delay: i * 0.03 }}
-                        className={`p-4 rounded-2xl border shadow-md flex gap-4 items-start ${isDark
-                                ? "bg-gray-800 border-gray-700"
-                                : "bg-white border-gray-200"
-                            }`}
-                    >
-                        {/* Avatar */}
-                        {v.employee_image && (
-                            <img
-                                src={`${backend}/${v.employee_image}`}
-                                className="w-12 h-12 rounded-full object-cover"
-                                onError={(e) => (e.target.style.display = "none")}
-                            />
+            {/* WHITE CARD */}
+            <div className="-mt-6">
+                <div className="bg-white dark:bg-[#1a1a1a] rounded-t-[32px] px-6 py-6 shadow-sm">
+                    {/* FILTERS */}
+                    <div className="space-y-4 mb-4">
+                        {isProvider && (
+                            <select
+                                value={employeeFilter}
+                                onChange={(e) => setEmployeeFilter(e.target.value)}
+                                className="w-full bg-white dark:bg-[#2a2a2a] text-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-2xl py-3 px-4 text-[15px]"
+                            >
+                                <option value="all">Wszyscy pracownicy</option>
+                                {employees.map((e) => (
+                                    <option key={e.id} value={e.id}>
+                                        {e.name}
+                                    </option>
+                                ))}
+                            </select>
                         )}
 
-                        <div className="flex-1">
-                            <div className="font-semibold text-lg">
-                                {v.employee_name}
-                            </div>
+                        <div className="flex flex-col sm:flex-row gap-3">
+                            <select
+                                value={year}
+                                onChange={(e) => setYear(Number(e.target.value))}
+                                className="w-full bg-white dark:bg-[#2a2a2a] text-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-2xl py-3 px-4 text-[15px]"
+                            >
+                                {years.map((y) => (
+                                    <option key={y} value={y}>
+                                        {y}
+                                    </option>
+                                ))}
+                            </select>
 
-                            <div className="text-sm mt-1 opacity-80">
-                                {formatDate(v.start_date)} → {formatDate(v.end_date)}
-                            </div>
+                            <select
+                                value={month}
+                                onChange={(e) => setMonth(Number(e.target.value))}
+                                className="w-full bg-white dark:bg-[#2a2a2a] text-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-2xl py-3 px-4 text-[15px]"
+                            >
+                                {months.map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                        {m.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                            {v.reason && (
-                                <div className="text-sm italic opacity-70 mt-1">
-                                    {v.reason}
+                        {/* ADD BUTTON */}
+                        <button
+                            onClick={() => setOpenAdd(true)}
+                            className="w-full bg-[#e57b2c] dark:bg-[#b86422] text-white rounded-2xl py-3 flex items-center justify-center gap-2 text-[15px] font-medium"
+                        >
+                            <Plus size={18} />
+                            Dodaj urlop
+                        </button>
+                    </div>
+
+                    {/* LISTA URLOPÓW */}
+                    <div className="space-y-3">
+                        {vacations.map((v, i) => (
+                            <motion.div
+                                key={v.id}
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: i * 0.02 }}
+                                className="bg-white dark:bg-[#2a2a2a] border border-gray-200 dark:border-gray-700 rounded-3xl px-5 py-4 flex items-start gap-4"
+                            >
+                                {/* AVATAR */}
+                                {v.employee_image && (
+                                    <img
+                                        src={`${backend}/${v.employee_image}`}
+                                        className="w-12 h-12 rounded-full object-cover mt-1"
+                                        onError={(e) => {
+                                            e.target.style.display = "none";
+                                        }}
+                                    />
+                                )}
+
+                                {/* TEXT */}
+                                <div className="flex-1">
+                                    <div className="text-[16px] font-semibold text-gray-900 dark:text-gray-100">
+                                        {v.employee_name}
+                                    </div>
+
+                                    <div className="text-[14px] text-gray-500 dark:text-gray-400 mt-1">
+                                        {formatDate(v.start_date)} — {formatDate(v.end_date)}
+                                    </div>
+
+                                    {v.reason && (
+                                        <div className="text-[13px] italic text-gray-500 dark:text-gray-400 mt-1">
+                                            {v.reason}
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
 
-                        {/* ACTIONS */}
-                        <div className="flex flex-col gap-2">
-                            <button
-                                onClick={() => {
-                                    setSelectedVacation(v);
-                                    setOpenEdit(true);
-                                }}
-                                className="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
-                            >
-                                <Pencil size={16} />
-                            </button>
+                                {/* ACTION BUTTONS */}
+                                <div className="flex flex-col gap-2">
+                                    <button
+                                        onClick={() => {
+                                            setSelectedVacation(v);
+                                            setOpenEdit(true);
+                                        }}
+                                        className="p-2 rounded-xl bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
+                                    >
+                                        <Pencil size={16} />
+                                    </button>
 
+                                    
+                                </div>
+                            </motion.div>
+                        ))}
+
+                        {/* LOAD MORE */}
+                        {vacations.length < total && (
                             <button
-                                onClick={() => {
-                                    setSelectedVacation(v);
-                                    setOpenEdit(true);
-                                }}
-                                className="p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white"
+                                onClick={loadMore}
+                                className="w-full bg-[#e57b2c] dark:bg-[#b86422] text-white rounded-full py-2.5 mt-2"
                             >
-                                <Trash2 size={16} />
+                                {loading ? "Ładowanie..." : "Pokaż więcej"}
                             </button>
-                        </div>
-                    </motion.div>
-                ))}
+                        )}
+                    </div>
+                </div>
             </div>
 
-            {/* LOAD MORE */}
-            {vacations.length < total && (
-                <div className="mt-6 flex justify-center">
-                    <button
-                        onClick={loadMore}
-                        className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white shadow-md"
-                    >
-                        {loading ? "Ładowanie..." : "Pokaż więcej"}
-                    </button>
-                </div>
-            )}
-
-            {/* MODALS */}
+            {/* MODALE */}
             <VacationModal
                 open={openAdd}
                 onClose={() => setOpenAdd(false)}
