@@ -1,30 +1,26 @@
 <!doctype html>
 <html lang="pl">
 <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8">
 
-    <!-- ✅ iOS PWA fullscreen + obsługa notcha -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- iOS PWA fullscreen + notch support -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Elegant Barber">
 
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <!-- Theme color (must be ONE for iOS) -->
 
-    <meta name="apple-mobile-web-app-title" content="Elegant Barber" />
 
-    <!-- ✅ Safari + Android kolor status bara -->
-    <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />
 
     <!-- Manifest -->
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <link rel="apple-touch-icon" href="/vite.svg" />
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/svg+xml" href="/vite.svg">
+    <link rel="apple-touch-icon" href="/vite.svg">
 
     <title>Elegant Barber</title>
 
-    <!-- 🔥 Instant Theme Loader -->
+    <!-- Instant Theme Loader -->
     <script>
         (function () {
             try {
@@ -48,7 +44,7 @@
         })();
     </script>
 
-    <!-- SAFE AREA CSS -->
+    <!-- Safe area -->
     <style>
         html, body {
             margin: 0;
@@ -61,18 +57,13 @@
 
         .safe-top {
             height: env(safe-area-inset-top);
-            min-height: constant(safe-area-inset-top);
             background: inherit;
             width: 100%;
         }
 
-        @supports not (padding-top: env(safe-area-inset-top)) {
+        @supports not (height: env(safe-area-inset-top)) {
             .safe-top {
                 height: 20px;
-            }
-
-            #root {
-                padding-top: 36px;
             }
         }
     </style>

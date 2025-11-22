@@ -1,12 +1,11 @@
 {
   "name": "Elegant Barber",
-  "short_name": "Salon",
-  "start_url": "/",
+  "short_name": "Apkaa",
+  "start_url": "/?standalone=true",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0f0f10",
-  "theme_color": "#0f0f10",   
-  "orientation": "portrait",
+  "theme_color": "#0f0f10",
   "icons": [
     {
       "src": "/vite.svg",
