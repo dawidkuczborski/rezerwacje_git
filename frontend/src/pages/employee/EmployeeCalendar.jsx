@@ -1126,27 +1126,30 @@ useEffect(() => {
 
 
 
-
     useEffect(() => {
         let startX = 0;
         let startY = 0;
         let isTouch = false;
         let isScrollingVertically = false;
+        let edgeAtStart = null; // "left" | "right" | null
 
-        const HORIZONTAL_SWIPE_THRESHOLD = 80; // mocne pociągniecie
+        const HORIZONTAL_SWIPE_THRESHOLD = 90; // musi być wyraźne pociągnięcie
         const VERTICAL_CANCEL = 20;
 
-        const page = document.getElementById("employee-calendar-page");
-        const scrollContainer = document.querySelector(".employee-col")?.parentElement;
+        const container = document.getElementById("employee-scroll-container");
+        if (!container) return;
 
-        if (!page || !scrollContainer) return;
+        const hasHorizontalScroll = () =>
+            container.scrollWidth - container.clientWidth > 16; // żeby nie łapać, gdy nie ma w ogóle scrolla
 
-        function isAtScrollEdge() {
-            const left = scrollContainer.scrollLeft;
-            const max = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+        const getEdgeAtStart = () => {
+            if (!hasHorizontalScroll()) return null;
 
-            return left <= 0 || left >= max;  // 🔥 klucz
-        }
+            const max = container.scrollWidth - container.clientWidth;
+            if (container.scrollLeft <= 0) return "left";
+            if (container.scrollLeft >= max - 1) return "right";
+            return null;
+        };
 
         function onTouchStart(e) {
             if (editingEventId !== null || resizing.current) return;
@@ -1156,6 +1159,9 @@ useEffect(() => {
 
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
+
+            // 🔥 KLUCZ: zapisujemy, czy W MOMENCIE startu byliśmy na krawędzi scrolla
+            edgeAtStart = getEdgeAtStart();
         }
 
         function onTouchMove(e) {
@@ -1164,50 +1170,55 @@ useEffect(() => {
             const dx = e.touches[0].clientX - startX;
             const dy = e.touches[0].clientY - startY;
 
-            // pionowy ruch = normalny scroll
+            // pionowy ruch → normalny scroll, anulujemy swipe
             if (Math.abs(dy) > VERTICAL_CANCEL) {
                 isScrollingVertically = true;
                 return;
             }
             if (isScrollingVertically) return;
 
-            // 🔥 swipe działa TYLKO gdy scroll jest na brzegu
-            if (!isAtScrollEdge()) return;
+            // 🔒 jeśli gest NIE zaczął się na krawędzi scrolla → traktujemy jak zwykły poziomy scroll
+            if (!edgeAtStart) return;
 
-            // musi być mocny poziomy ruch
+            // musi być wyraźne pociągnięcie w bok
             if (Math.abs(dx) < HORIZONTAL_SWIPE_THRESHOLD) return;
 
-            if (dx < 0) {
-                // w prawo -> następny dzień
-                setActiveDay(prev => {
-                    const d = new Date(prev);
-                    d.setDate(prev.getDate() + 1);
-                    return d;
-                });
-            } else {
-                // w lewo -> poprzedni dzień
+            // 🔥 ważne: kierunek musi być "na zewnątrz" krawędzi
+            if (edgeAtStart === "left" && dx > 0) {
+                // krawędź lewa + pociągnięcie w PRAWO → poprzedni dzień
                 setActiveDay(prev => {
                     const d = new Date(prev);
                     d.setDate(prev.getDate() - 1);
                     return d;
                 });
+            } else if (edgeAtStart === "right" && dx < 0) {
+                // krawędź prawa + pociągnięcie w LEWO → następny dzień
+                setActiveDay(prev => {
+                    const d = new Date(prev);
+                    d.setDate(prev.getDate() + 1);
+                    return d;
+                });
             }
 
+            // blokujemy kolejne wywołania w tym samym geście
             isTouch = false;
+            edgeAtStart = null;
         }
 
         function onTouchEnd() {
             isTouch = false;
+            edgeAtStart = null;
         }
 
-        page.addEventListener("touchstart", onTouchStart, { passive: true });
-        page.addEventListener("touchmove", onTouchMove, { passive: true });
-        page.addEventListener("touchend", onTouchEnd, { passive: true });
+        // 👇 bardzo ważne: nasłuchujemy TYLKO na poziomym kontenerze pracowników
+        container.addEventListener("touchstart", onTouchStart, { passive: true });
+        container.addEventListener("touchmove", onTouchMove, { passive: true });
+        container.addEventListener("touchend", onTouchEnd, { passive: true });
 
         return () => {
-            page.removeEventListener("touchstart", onTouchStart);
-            page.removeEventListener("touchmove", onTouchMove);
-            page.removeEventListener("touchend", onTouchEnd);
+            container.removeEventListener("touchstart", onTouchStart);
+            container.removeEventListener("touchmove", onTouchMove);
+            container.removeEventListener("touchend", onTouchEnd);
         };
     }, [editingEventId]);
 
@@ -1660,7 +1671,11 @@ useEffect(() => {
           </div>
 
           {/* Employee columns */}
-          <div className="flex gap-3 overflow-x-auto w-full scroll-smooth">
+                  <div
+                      id="employee-scroll-container"
+                      className="flex gap-3 overflow-x-auto w-full scroll-smooth"
+                  >
+
             {payload.employees
               .filter((emp) => emp.is_active)
               .map((emp) => (
