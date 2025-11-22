@@ -1133,7 +1133,7 @@ useEffect(() => {
         let isScrollingVertically = false;
         let edgeAtStart = null; // "left" | "right" | null
 
-        const HORIZONTAL_SWIPE_THRESHOLD = 90; // musi być wyraźne pociągnięcie
+        const HORIZONTAL_SWIPE_THRESHOLD = 150; // musi być wyraźne pociągnięcie
         const VERTICAL_CANCEL = 20;
 
         const container = document.getElementById("employee-scroll-container");
