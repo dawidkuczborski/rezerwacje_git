@@ -1121,23 +1121,32 @@ useEffect(() => {
 
 
 
+
+
+
+
+
+
     useEffect(() => {
         let startX = 0;
         let startY = 0;
-        let startTime = 0;
-
         let isTouch = false;
         let isScrollingVertically = false;
 
-        // progi swipe
-        const horizontalSwipeDistance = 120;   // było 60 – dużo trudniej zrobić swipe
-        const verticalCancelThreshold = 15;    // było 20 – łatwiej anulować
-        const fastSwipeSpeed = 0.8;           // było 0.5 – flick musi być szybszy
+        const HORIZONTAL_SWIPE_THRESHOLD = 80; // mocne pociągniecie
+        const VERTICAL_CANCEL = 20;
 
-        const area = document.getElementById("calendar-scroll-area");
         const page = document.getElementById("employee-calendar-page");
+        const scrollContainer = document.querySelector(".employee-col")?.parentElement;
 
-        if (!area || !page) return;
+        if (!page || !scrollContainer) return;
+
+        function isAtScrollEdge() {
+            const left = scrollContainer.scrollLeft;
+            const max = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+
+            return left <= 0 || left >= max;  // 🔥 klucz
+        }
 
         function onTouchStart(e) {
             if (editingEventId !== null || resizing.current) return;
@@ -1147,7 +1156,6 @@ useEffect(() => {
 
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
-            startTime = performance.now();
         }
 
         function onTouchMove(e) {
@@ -1156,38 +1164,28 @@ useEffect(() => {
             const dx = e.touches[0].clientX - startX;
             const dy = e.touches[0].clientY - startY;
 
-            // jeśli ruch pionowy → klasyczne scrollowanie, blokujemy swipe
-            if (Math.abs(dy) > verticalCancelThreshold) {
+            // pionowy ruch = normalny scroll
+            if (Math.abs(dy) > VERTICAL_CANCEL) {
                 isScrollingVertically = true;
                 return;
             }
             if (isScrollingVertically) return;
 
-            // 🔥 KLUCZ → sprawdzamy czy użytkownik jest przy którejś krawędzi
-            const atLeftEdge = area.scrollLeft <= 0;
-            const atRightEdge = area.scrollLeft >= area.scrollWidth - area.clientWidth - 1;
+            // 🔥 swipe działa TYLKO gdy scroll jest na brzegu
+            if (!isAtScrollEdge()) return;
 
-            // Jeśli nie jesteś przy krawędzi → NIE MA DZIAŁANIA
-            if (!atLeftEdge && !atRightEdge) return;
+            // musi być mocny poziomy ruch
+            if (Math.abs(dx) < HORIZONTAL_SWIPE_THRESHOLD) return;
 
-            const timeElapsed = performance.now() - startTime;
-            const speed = Math.abs(dx) / timeElapsed;
-
-            const isSwipe =
-                Math.abs(dx) > horizontalSwipeDistance ||
-                speed > fastSwipeSpeed;
-
-            if (!isSwipe) return;
-
-            if (dx < 0 && atRightEdge) {
-                // next day
+            if (dx < 0) {
+                // w prawo -> następny dzień
                 setActiveDay(prev => {
                     const d = new Date(prev);
                     d.setDate(prev.getDate() + 1);
                     return d;
                 });
-            } else if (dx > 0 && atLeftEdge) {
-                // previous day
+            } else {
+                // w lewo -> poprzedni dzień
                 setActiveDay(prev => {
                     const d = new Date(prev);
                     d.setDate(prev.getDate() - 1);
@@ -1195,7 +1193,7 @@ useEffect(() => {
                 });
             }
 
-            isTouch = false; // blokujemy kolejne swipe w tym samym ruchu
+            isTouch = false;
         }
 
         function onTouchEnd() {
@@ -1212,7 +1210,6 @@ useEffect(() => {
             page.removeEventListener("touchend", onTouchEnd);
         };
     }, [editingEventId]);
-
 
 
 
