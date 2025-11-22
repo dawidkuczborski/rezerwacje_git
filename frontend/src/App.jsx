@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
@@ -27,16 +27,18 @@ import EmployeeServicesManager from "./pages/EmployeeServicesManager";
 import ScheduleManager from "./pages/ScheduleManager";
 import PortfolioManager from "./pages/PortfolioManager";
 import ChooseSalon from "./pages/ChooseSalon";
+
 // Panel pracownika
 import EmployeeCalendar from "./pages/employee/EmployeeCalendar";
 import EmployeeCalendarMonthView from "./pages/employee/EmployeeCalendarMonthView";
 import Vacations from "./pages/employee/Vacations";
 import Clients from "./pages/employee/Clients";
 import Settings from "./pages/employee/Settings";
+
 function AppRoutes() {
     const { firebaseUser, backendUser, loading } = useAuth();
 
-    // 🔥 ELEGANCKI SPINNER ŁADOWANIA
+    // 🔥 Spinner
     if (loading) {
         return (
             <div
@@ -60,10 +62,10 @@ function AppRoutes() {
 
                 <style>
                     {`
-            @keyframes spin {
-              to { transform: rotate(360deg); }
-            }
-          `}
+                    @keyframes spin {
+                      to { transform: rotate(360deg); }
+                    }
+                `}
                 </style>
             </div>
         );
@@ -83,7 +85,7 @@ function AppRoutes() {
         <Routes>
             <Route path="/" element={<Navigate to={redirectByRole()} replace />} />
 
-            {/* 🔥 Jeden login dla wszystkich */}
+            {/* 🔥 Login */}
             <Route
                 path="/login"
                 element={
@@ -99,7 +101,7 @@ function AppRoutes() {
             <Route path="/register-client" element={<RegisterClient />} />
             <Route path="/register-provider" element={<RegisterProvider />} />
 
-            {/* 🔥 Kalendarz klienta */}
+            {/* 🔥 Klient */}
             <Route
                 path="/calendar"
                 element={
@@ -111,7 +113,6 @@ function AppRoutes() {
                 }
             />
 
-            {/* Flow klienta */}
             <Route
                 path="/salons"
                 element={
@@ -179,7 +180,7 @@ function AppRoutes() {
                 }
             />
 
-            {/* Panel właściciela */}
+            {/* 🔥 Panel właściciela */}
             <Route
                 path="/panel"
                 element={
@@ -201,7 +202,6 @@ function AppRoutes() {
                     )
                 }
             />
-
 
             <Route
                 path="/panel/salon"
@@ -269,7 +269,7 @@ function AppRoutes() {
                 }
             />
 
-            {/* Panel pracownika */}
+            {/* 🔥 Panel pracownika */}
             <Route
                 path="/employee/calendar"
                 element={
@@ -291,6 +291,7 @@ function AppRoutes() {
                     )
                 }
             />
+
             <Route
                 path="/employee/clients"
                 element={
@@ -301,6 +302,7 @@ function AppRoutes() {
                     )
                 }
             />
+
             <Route
                 path="/employee/settings"
                 element={
@@ -329,16 +331,38 @@ function AppRoutes() {
     );
 }
 
+//
+// ⭐ POPRAWIONA CZĘŚĆ – UKRYWANIE MENU
+//
+function AppLayout() {
+    const location = useLocation();
+
+    // Strony bez menu
+    const hideMenuOn = ["/login", "/register-client", "/register-provider"];
+
+    const shouldHideMenu = hideMenuOn.includes(location.pathname);
+
+    return (
+        <>
+            <div className="pb-[70px] transition-colors duration-500">
+                <AppRoutes />
+            </div>
+
+            {!shouldHideMenu && (
+                <>
+                    <BottomNav />
+                    <BottomNavEmployee />
+                </>
+            )}
+        </>
+    );
+}
+
 export default function App() {
     return (
         <AuthProvider>
             <Router>
-                <div className="pb-[70px] transition-colors duration-500">
-                    <AppRoutes />
-                </div>
-
-                <BottomNav />
-                <BottomNavEmployee />
+                <AppLayout />
             </Router>
         </AuthProvider>
     );
