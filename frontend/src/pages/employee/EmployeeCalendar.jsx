@@ -1130,9 +1130,9 @@ useEffect(() => {
         let isScrollingVertically = false;
 
         // progi swipe
-        const horizontalSwipeDistance = 60;
-        const verticalCancelThreshold = 20;
-        const fastSwipeSpeed = 0.5;
+        const horizontalSwipeDistance = 120;   // było 60 – dużo trudniej zrobić swipe
+        const verticalCancelThreshold = 15;    // było 20 – łatwiej anulować
+        const fastSwipeSpeed = 0.8;           // było 0.5 – flick musi być szybszy
 
         const area = document.getElementById("calendar-scroll-area");
         const page = document.getElementById("employee-calendar-page");
