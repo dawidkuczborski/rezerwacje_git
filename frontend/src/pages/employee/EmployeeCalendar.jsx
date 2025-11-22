@@ -1121,8 +1121,6 @@ useEffect(() => {
 
 
 
-
-
     useEffect(() => {
         let startX = 0;
         let startY = 0;
@@ -1131,9 +1129,15 @@ useEffect(() => {
         let isTouch = false;
         let isScrollingVertically = false;
 
-        const distanceThreshold = 200;   // OGROMNY dystans
-        const verticalBlock = 30;        // mały ruch w pionie kasuje swipe
-        const speedThreshold = 1.0;      // bardzo szybki ruch ("flick")
+        // progi swipe
+        const horizontalSwipeDistance = 60;
+        const verticalCancelThreshold = 20;
+        const fastSwipeSpeed = 0.5;
+
+        const area = document.getElementById("calendar-scroll-area");
+        const page = document.getElementById("employee-calendar-page");
+
+        if (!area || !page) return;
 
         function onTouchStart(e) {
             if (editingEventId !== null || resizing.current) return;
@@ -1152,28 +1156,38 @@ useEffect(() => {
             const dx = e.touches[0].clientX - startX;
             const dy = e.touches[0].clientY - startY;
 
-            if (Math.abs(dy) > verticalBlock) {
+            // jeśli ruch pionowy → klasyczne scrollowanie, blokujemy swipe
+            if (Math.abs(dy) > verticalCancelThreshold) {
                 isScrollingVertically = true;
                 return;
             }
-
             if (isScrollingVertically) return;
+
+            // 🔥 KLUCZ → sprawdzamy czy użytkownik jest przy którejś krawędzi
+            const atLeftEdge = area.scrollLeft <= 0;
+            const atRightEdge = area.scrollLeft >= area.scrollWidth - area.clientWidth - 1;
+
+            // Jeśli nie jesteś przy krawędzi → NIE MA DZIAŁANIA
+            if (!atLeftEdge && !atRightEdge) return;
 
             const timeElapsed = performance.now() - startTime;
             const speed = Math.abs(dx) / timeElapsed;
 
-            const strongSwipe =
-                Math.abs(dx) > distanceThreshold || speed > speedThreshold;
+            const isSwipe =
+                Math.abs(dx) > horizontalSwipeDistance ||
+                speed > fastSwipeSpeed;
 
-            if (!strongSwipe) return;
+            if (!isSwipe) return;
 
-            if (dx < 0) {
+            if (dx < 0 && atRightEdge) {
+                // next day
                 setActiveDay(prev => {
                     const d = new Date(prev);
                     d.setDate(prev.getDate() + 1);
                     return d;
                 });
-            } else {
+            } else if (dx > 0 && atLeftEdge) {
+                // previous day
                 setActiveDay(prev => {
                     const d = new Date(prev);
                     d.setDate(prev.getDate() - 1);
@@ -1181,27 +1195,23 @@ useEffect(() => {
                 });
             }
 
-            isTouch = false;
+            isTouch = false; // blokujemy kolejne swipe w tym samym ruchu
         }
 
         function onTouchEnd() {
             isTouch = false;
         }
 
-        const area = document.getElementById("employee-calendar-page");
-        if (!area) return;
-
-        area.addEventListener("touchstart", onTouchStart, { passive: true });
-        area.addEventListener("touchmove", onTouchMove, { passive: true });
-        area.addEventListener("touchend", onTouchEnd, { passive: true });
+        page.addEventListener("touchstart", onTouchStart, { passive: true });
+        page.addEventListener("touchmove", onTouchMove, { passive: true });
+        page.addEventListener("touchend", onTouchEnd, { passive: true });
 
         return () => {
-            area.removeEventListener("touchstart", onTouchStart);
-            area.removeEventListener("touchmove", onTouchMove);
-            area.removeEventListener("touchend", onTouchEnd);
+            page.removeEventListener("touchstart", onTouchStart);
+            page.removeEventListener("touchmove", onTouchMove);
+            page.removeEventListener("touchend", onTouchEnd);
         };
     }, [editingEventId]);
-
 
 
 
