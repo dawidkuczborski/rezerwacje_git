@@ -860,12 +860,8 @@ if (firebaseUser === null) {
             ...e,
             day_off: Boolean(e.day_off || e.is_day_off),
             time_off: e.time_off ?? [],
-              appointments: e.appointments?.map(a => ({
-                  ...a,
-                  client_name: a.client_uid
-                      ? (a.client_name?.trim() || "Klient")
-                      : `${a.client_name?.trim() || "Klient"} (bez konta)`
-              })) ?? []
+              appointments: e.appointments ?? []
+
 
           }))
         };
@@ -901,12 +897,8 @@ const refreshCalendar = useCallback(async () => {
         ...e,
         day_off: Boolean(e.day_off || e.is_day_off),
         time_off: e.time_off ?? [],
-          appointments: e.appointments?.map(a => ({
-              ...a,
-              client_name: a.client_uid
-                  ? (a.client_name?.trim() || "Klient")
-                  : `${a.client_name?.trim() || "Klient"} (bez konta)`
-          })) ?? []
+          appointments: e.appointments ?? []
+
 
       }))
     };
@@ -1487,12 +1479,8 @@ useEffect(() => {
           ...e,
           day_off: Boolean(e.day_off || e.is_day_off),
           time_off: e.time_off ?? [],
-            appointments: e.appointments?.map(a => ({
-                ...a,
-                client_name: a.client_uid
-                    ? (a.client_name?.trim() || "Klient")
-                    : `${a.client_name?.trim() || "Klient"} (bez konta)`
-            })) ?? []
+            appointments: e.appointments ?? []
+
 
         }))
       };

@@ -1426,22 +1426,63 @@ app.get(
 
             // ZAWSZE świeże dane
             const appointmentsRes = await pool.query(
-                `SELECT a.id, a.employee_id, a.date::date, a.start_time, a.end_time,
-                        COALESCE(u.name, CONCAT(sc.first_name, ' ', sc.last_name), 'Klient') AS client_name,
-                        a.client_uid,
-                        COALESCE(s.name, 'Usługa') AS service_name,
-                        COALESCE(STRING_AGG(sa.name, ', ' ORDER BY sa.name), '') AS addons
-                 FROM appointments a
-                 LEFT JOIN users u ON a.client_uid = u.uid
-                 LEFT JOIN salon_clients sc ON sc.first_appointment_id = a.id AND sc.salon_id = a.salon_id
-                 LEFT JOIN services s ON a.service_id=s.id
-                 LEFT JOIN appointment_addons aa ON a.id=aa.appointment_id
-                 LEFT JOIN service_addons sa ON aa.addon_id=sa.id
-                 WHERE a.salon_id=$1 AND a.date=$2 AND a.status!='cancelled'
-                 GROUP BY a.id, u.name, sc.first_name, sc.last_name, s.name
-                 ORDER BY a.start_time ASC`,
+                `SELECT 
+        a.id,
+        a.employee_id,
+        a.date::date,
+        a.start_time,
+        a.end_time,
+
+        CASE 
+            WHEN a.client_uid IS NOT NULL THEN 
+                COALESCE(u.name, 'Klient')
+            ELSE
+                CONCAT(
+                    COALESCE(sc.first_name, 'Klient'), 
+                    ' ',
+                    COALESCE(sc.last_name, ''),
+                    ' (bez konta)'
+                )
+        END AS client_name,
+
+        a.client_uid,
+        a.client_local_id,
+
+        COALESCE(s.name, 'Usługa') AS service_name,
+        COALESCE(STRING_AGG(sa.name, ', ' ORDER BY sa.name), '') AS addons
+
+     FROM appointments a
+
+     LEFT JOIN users u 
+        ON a.client_uid = u.uid
+
+     LEFT JOIN salon_clients sc 
+        ON sc.id = a.client_local_id
+
+     LEFT JOIN services s 
+        ON a.service_id = s.id
+
+     LEFT JOIN appointment_addons aa 
+        ON a.id = aa.appointment_id
+
+     LEFT JOIN service_addons sa 
+        ON aa.addon_id = sa.id
+
+     WHERE a.salon_id = $1 
+       AND a.date = $2 
+       AND a.status != 'cancelled'
+
+     GROUP BY 
+        a.id, 
+        u.name, 
+        sc.first_name, 
+        sc.last_name, 
+        s.name
+
+     ORDER BY a.start_time ASC`,
                 [salonId, date]
             );
+
 
             const timeOffFresh = await pool.query(
                 `SELECT id, employee_id, date, start_time, end_time, reason
