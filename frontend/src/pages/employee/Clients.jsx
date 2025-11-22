@@ -154,7 +154,6 @@ export default function Clients() {
                 )}
             </div>
 
-
             {/* LIST VIEW */}
             {!selectedClient && (
                 <div className="-mt-6">
@@ -253,10 +252,14 @@ export default function Clients() {
 
                         {/* Upcoming */}
                         <div className="mt-7">
-                            <h3 className="text-[18px] font-semibold text-gray-900 dark:text-gray-100">Nadchodzące wizyty</h3>
+                            <h3 className="text-[18px] font-semibold text-gray-900 dark:text-gray-100">
+                                Nadchodzące wizyty
+                            </h3>
 
                             {selectedClient.upcoming_appointments.length === 0 && (
-                                <div className="text-gray-400 dark:text-gray-500 text-sm mt-1">Brak wizyt</div>
+                                <div className="text-gray-400 dark:text-gray-500 text-sm mt-1">
+                                    Brak wizyt
+                                </div>
                             )}
 
                             {selectedClient.upcoming_appointments.map((a, i) => (
@@ -284,12 +287,59 @@ export default function Clients() {
 
                         {/* Past */}
                         <div className="mt-8 mb-14">
-                            <h3 className="text-[18px] font-semibold text-gray-900 dark:text-gray-100">Zakończone wizyty</h3>
+                            <h3 className="text-[18px] font-semibold text-gray-900 dark:text-gray-100">
+                                Zakończone wizyty
+                            </h3>
 
                             {selectedClient.past_appointments.length === 0 && (
-                                <div className="text-gray-400 dark:text-gray-500 text-sm mt-1">Brak historii</div>
+                                <div className="text-gray-400 dark:text-gray-500 text-sm mt-1">
+                                    Brak historii
+                                </div>
                             )}
+
+                            {selectedClient.past_appointments.map((a, i) => {
+                                const isCompleted = a.status === "completed";
+                                const borderColor = isCompleted
+                                    ? "border-green-500 dark:border-green-600"
+                                    : "border-red-500 dark:border-red-700";
+
+                                const statusLabel = isCompleted ? "Zakończona" : "Anulowana";
+
+                                return (
+                                    <div
+                                        key={i}
+                                        className={`bg-white dark:bg-[#2a2a2a] border ${borderColor} rounded-2xl px-4 py-4 mt-3`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div className="font-medium text-[15px] text-gray-900 dark:text-gray-100">
+                                                {formatDate(a.date)} • {formatTime(a.start_time)} — {formatTime(a.end_time)}
+                                            </div>
+
+                                            <span
+                                                className={`text-xs px-2 py-1 rounded-md ${isCompleted
+                                                        ? "bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-200"
+                                                        : "bg-red-100 text-red-700 dark:bg-red-800 dark:text-red-200"
+                                                    }`}
+                                            >
+                                                {statusLabel}
+                                            </span>
+                                        </div>
+
+                                        <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                            {a.service_name}, {a.employee_name}
+                                        </div>
+
+                                        <button
+                                            onClick={() => openRebookModal(a)}
+                                            className="text-[#e57b2c] dark:text-[#ff944d] text-sm font-medium mt-3"
+                                        >
+                                            Umów ponownie
+                                        </button>
+                                    </div>
+                                );
+                            })}
                         </div>
+
 
                     </div>
                 </div>

@@ -5372,7 +5372,7 @@ app.get(
             return res.status(400).json({ error: "Nieprawidłowe id klienta" });
         }
 
-        // 1) POBIERAMY DANE KLIENTA
+        // 1) Pobranie klienta
         const clientRes = await pool.query(
             `
             SELECT
@@ -5390,12 +5390,10 @@ app.get(
         }
 
         const client = clientRes.rows[0];
-        const salonId = client.salon_id;     // <<< już poprawnie istnieje
+        const salonId = client.salon_id;
         const clientUid = client.client_uid || null;
 
-        const today = new Date().toISOString().slice(0, 10);
-
-        // 2) NADCHODZĄCE WIZYTY (Z ADDONS)
+        // 2) NADCHODZĄCE — WSZYSTKIE booked
         const upcomingRes = await pool.query(
             `
             SELECT 
@@ -5424,14 +5422,13 @@ app.get(
                     OR ($3::text IS NOT NULL AND a.client_uid = $3)
                   )
               AND a.status = 'booked'
-              AND a.date >= $4::date
             GROUP BY a.id, e.name, s.name
             ORDER BY a.date ASC, a.start_time ASC
             `,
-            [salonId, clientLocalId, clientUid, today]
+            [salonId, clientLocalId, clientUid]
         );
 
-        // 3) ZAKOŃCZONE WIZYTY (Z ADDONS)
+        // 3) ZAKOŃCZONE — WSZYSTKO CO NIE BOOKED
         const pastRes = await pool.query(
             `
             SELECT 
@@ -5459,18 +5456,15 @@ app.get(
                     a.client_local_id = $2
                     OR ($3::text IS NOT NULL AND a.client_uid = $3)
                   )
-              AND (
-                   a.date < $4::date
-                OR a.status IN ('completed', 'cancelled', 'no_show')
-                  )
+              AND a.status != 'booked'
             GROUP BY a.id, e.name, s.name
             ORDER BY a.date DESC, a.start_time DESC
-            LIMIT 50
+            LIMIT 200
             `,
-            [salonId, clientLocalId, clientUid, today]
+            [salonId, clientLocalId, clientUid]
         );
 
-        // 4) ODPOWIEDŹ
+        // 4) Odpowiedź
         res.json({
             client: {
                 id: client.id,
@@ -5489,6 +5483,8 @@ app.get(
         });
     })
 );
+
+
 
 
 
