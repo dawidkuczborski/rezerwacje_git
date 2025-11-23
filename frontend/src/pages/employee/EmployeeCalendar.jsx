@@ -2147,17 +2147,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Floating add button */}
-        <div
-  className="fixed right-5"
-  style={{ bottom: 90, zIndex: 60 }}
-  onClick={() => setNewAppointmentOpen(true)}
->
-  <button className="w-14 h-14 rounded-full flex items-center justify-center bg-gradient-to-b from-orange-400 to-red-500 text-white shadow-xl">
-    <Plus size={28} color="white" />
-  </button>
-</div>
-
+   
 
         {/* conflict modal */}
         {conflictModal.visible && (

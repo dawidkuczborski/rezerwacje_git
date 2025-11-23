@@ -34,6 +34,7 @@ import EmployeeCalendarMonthView from "./pages/employee/EmployeeCalendarMonthVie
 import Vacations from "./pages/employee/Vacations";
 import Clients from "./pages/employee/Clients";
 import Settings from "./pages/employee/Settings";
+import Reservations from "./pages/employee/Reservations";
 
 function AppRoutes() {
     const { firebaseUser, backendUser, loading } = useAuth();
@@ -308,6 +309,16 @@ function AppRoutes() {
                 element={
                     isLoggedIn && backendUser?.role === "employee" ? (
                         <Settings />
+                    ) : (
+                        <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+            <Route
+                path="/employee/reservations"
+                element={
+                    isLoggedIn && backendUser?.role === "employee" ? (
+                        <Reservations />
                     ) : (
                         <Navigate to={redirectByRole()} replace />
                     )

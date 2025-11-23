@@ -529,6 +529,75 @@ app.post(
     })
 );
 
+
+app.post(
+    "/api/auth/link-client-phone",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ error: "Brak UID użytkownika" });
+
+        // 1. Pobranie numeru telefonu nowo zarejestrowanego użytkownika
+        const userRes = await pool.query(
+            `SELECT phone FROM users WHERE uid = $1`,
+            [uid]
+        );
+
+        if (!userRes.rows.length) {
+            return res.status(404).json({ error: "Nie znaleziono użytkownika w bazie" });
+        }
+
+        const phone = userRes.rows[0].phone;
+
+        // 2. Pobranie klientów z takim numerem
+        const clients = await pool.query(
+            `
+            SELECT id, salon_id, employee_id, first_name, last_name 
+            FROM salon_clients
+            WHERE phone = $1 AND client_uid IS NULL
+            `,
+            [phone]
+        );
+
+        if (clients.rows.length === 0) {
+            return res.json({
+                success: true,
+                message: "Brak klientów do powiązania"
+            });
+        }
+
+        // 3. Aktualizacja klienta + wszystkich jego rezerwacji
+        for (const c of clients.rows) {
+            // przypisz UID do salon client
+            await pool.query(
+                `
+                UPDATE salon_clients
+                SET client_uid = $1
+                WHERE id = $2
+                `,
+                [uid, c.id]
+            );
+
+            // zaktualizuj rezerwacje
+            await pool.query(
+                `
+                UPDATE appointments
+                SET client_uid = $1
+                WHERE client_local_id = $2
+                `,
+                [uid, c.id]
+            );
+        }
+
+        res.json({
+            success: true,
+            linked_count: clients.rows.length,
+            linked_clients: clients.rows
+        });
+    })
+);
+
+
 // Auth: me
 app.get(
     "/api/auth/me",
@@ -1553,7 +1622,297 @@ app.get(
     })
 );
 
+////lista rezerwacji//////
 
+
+
+
+async function resolveSalonAccess(uid, salonIdFromQuery) {
+    let salonId = salonIdFromQuery ? Number(salonIdFromQuery) : null;
+
+    // 1️⃣ Salon z query — priorytet
+    if (!salonId) {
+        const empRes = await pool.query(
+            "SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1",
+            [uid]
+        );
+
+        if (empRes.rows.length > 0) {
+            salonId = empRes.rows[0].salon_id;
+        }
+    }
+
+    // 2️⃣ Jeśli nadal brak → provider musi wybrać salon
+    if (!salonId) {
+        const userRes = await pool.query(
+            "SELECT is_provider FROM users WHERE uid=$1 LIMIT 1",
+            [uid]
+        );
+
+        const isProvider = userRes.rows[0]?.is_provider === true;
+
+        if (isProvider) {
+            throw new Error("Provider musi wybrać salon (brak salon_id)");
+        }
+    }
+
+    if (!salonId) {
+        throw new Error("Brak przypisanego salonu.");
+    }
+
+    // 3️⃣ Sprawdzenie blokady logowania
+    const lockExpiration = loginLocks.get(uid);
+    if (lockExpiration && lockExpiration > Date.now()) {
+        throw new Error("Dostęp zablokowany na 5 minut.");
+    }
+
+    // 4️⃣ employee czy provider?
+    const empRole = await pool.query(
+        "SELECT salon_id FROM employees WHERE uid=$1 LIMIT 1",
+        [uid]
+    );
+
+    const isEmployee = empRole.rows.length > 0;
+
+    if (isEmployee) {
+        const employeeSalon = empRole.rows[0].salon_id;
+
+        if (Number(salonId) !== Number(employeeSalon)) {
+            loginLocks.set(uid, Date.now() + 5 * 60 * 1000);
+
+            throw new Error("Nieautoryzowana zmiana salonu — wylogowano.");
+        }
+
+        salonId = employeeSalon;
+    } else {
+        // provider
+        const providerSalonsRes = await pool.query(
+            "SELECT id FROM salons WHERE owner_uid=$1",
+            [uid]
+        );
+
+        const providerSalonIds = providerSalonsRes.rows.map((s) => Number(s.id));
+
+        if (!providerSalonIds.includes(Number(salonId))) {
+            loginLocks.set(uid, Date.now() + 5 * 60 * 1000);
+
+            throw new Error("Provider nie ma dostępu do tego salonu — wylogowano.");
+        }
+    }
+
+    // 5️⃣ pobranie danych z cache/przygotowanie baseData
+    const cacheKey = `salon_${salonId}`;
+    const cacheTTL = 10 * 60 * 1000;
+    let baseData = salonCache.get(cacheKey);
+    const isExpired = !baseData || Date.now() - baseData.ts > cacheTTL;
+
+    if (isExpired) {
+        const [holidaysRes, scheduleRes, employeesRes] = await Promise.all([
+            pool.query("SELECT date FROM salon_holidays WHERE salon_id=$1", [salonId]),
+
+            pool.query(
+                `SELECT employee_id, open_time, close_time, is_day_off, day_of_week
+                 FROM employee_schedule
+                 WHERE employee_id IN (SELECT id FROM employees WHERE salon_id=$1)`,
+                [salonId]
+            ),
+
+            pool.query(
+                `SELECT 
+                    id AS employee_id,
+                    name AS employee_name,
+                    image_url AS employee_image_url,
+                    is_active
+                 FROM employees
+                 WHERE salon_id=$1
+                 ORDER BY name ASC`,
+                [salonId]
+            ),
+        ]);
+
+        baseData = {
+            holidays: holidaysRes.rows,
+            schedule: scheduleRes.rows,
+            employees: employeesRes.rows,
+            ts: Date.now(),
+        };
+
+        salonCache.set(cacheKey, baseData);
+    }
+
+    return { resolvedSalonId: salonId, baseData };
+}
+
+app.get(
+    "/api/calendar/shared/multi",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        try {
+            const uid = req.user?.uid;
+            if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+            let salonId = req.query.salon_id ? Number(req.query.salon_id) : null;
+            const datesRaw = req.query.dates;
+
+            if (!datesRaw)
+                return res.status(400).json({ error: "Brak parametru ?dates=YYYY-MM-DD,YYYY-MM-DD" });
+
+            const dates = datesRaw.split(",").map((d) => d.trim()).filter(Boolean);
+
+            if (!dates.length)
+                return res.status(400).json({ error: "Brak prawidłowych dat" });
+
+            // 🔐 pełna logika salonu + employee/provider jak w /shared
+            const { resolvedSalonId, baseData } = await resolveSalonAccess(uid, salonId);
+
+            const result = { days: {} };
+
+            await Promise.all(
+                dates.map(async (date) => {
+                    const dayOfWeek = new Date(date).getDay();
+
+                    // --- APPOINTMENTS + ceny usług i dodatków ---
+                    const appointmentsRes = await pool.query(
+                        `SELECT 
+                            a.id,
+                            a.employee_id,
+                            a.date::date,
+                            a.start_time,
+                            a.end_time,
+
+                            CASE 
+                                WHEN a.client_uid IS NOT NULL THEN 
+                                    COALESCE(u.name, 'Klient')
+                                ELSE
+                                    CONCAT(
+                                        COALESCE(sc.first_name, 'Klient'), 
+                                        ' ',
+                                        COALESCE(sc.last_name, ''),
+                                        ' (bez konta)'
+                                    )
+                            END AS client_name,
+
+                            s.name AS service_name,
+                            s.price AS service_price,
+
+                            COALESCE(STRING_AGG(sa.name, ', ' ORDER BY sa.name), '') AS addons,
+                            COALESCE(SUM(sa.price), 0) AS addons_price,
+
+                            (s.price + COALESCE(SUM(sa.price), 0)) AS total_price
+
+                        FROM appointments a
+                        LEFT JOIN users u ON a.client_uid = u.uid
+                        LEFT JOIN salon_clients sc ON sc.id = a.client_local_id
+                        LEFT JOIN services s ON a.service_id = s.id
+                        LEFT JOIN appointment_addons aa ON a.id = aa.appointment_id
+                        LEFT JOIN service_addons sa ON aa.addon_id = sa.id
+
+                        WHERE a.salon_id = $1 
+                          AND a.date = $2 
+                          AND a.status != 'cancelled'
+
+                        GROUP BY 
+                            a.id, 
+                            u.name, 
+                            sc.first_name, 
+                            sc.last_name, 
+                            s.name, 
+                            s.price
+
+                        ORDER BY a.start_time ASC`,
+                        [resolvedSalonId, date]
+                    );
+
+                    // --- TIME OFF ---
+                    const timeOffRes = await pool.query(
+                        `SELECT id, employee_id, date, start_time, end_time, reason
+                         FROM employee_time_off
+                         WHERE employee_id IN (SELECT id FROM employees WHERE salon_id=$1)
+                           AND date=$2`,
+                        [resolvedSalonId, date]
+                    );
+
+                    // --- VACATIONS ---
+                    const vacationsRes = await pool.query(
+                        `SELECT employee_id, start_date, end_date 
+                         FROM employee_vacations
+                         WHERE employee_id IN (SELECT id FROM employees WHERE salon_id=$1)`,
+                        [resolvedSalonId]
+                    );
+
+                    const isHoliday = baseData.holidays.some((h) => toYMD(h.date) === date);
+
+                    // --- TYLKO aktywni pracownicy ---
+                    const dayEmployees = baseData.employees
+                        .filter((e) => e.is_active) // <-- ważne!
+                        .map((emp) => {
+                            const schedule = baseData.schedule.find(
+                                (s) =>
+                                    Number(s.employee_id) === Number(emp.employee_id) &&
+                                    Number(s.day_of_week) === Number(dayOfWeek)
+                            );
+
+                            const isVacation = vacationsRes.rows.some((v) => {
+                                if (Number(v.employee_id) !== Number(emp.employee_id)) return false;
+
+                                const start = new Date(v.start_date);
+                                const end = new Date(v.end_date);
+                                end.setHours(23, 59, 59, 999);
+
+                                const current = new Date(date);
+                                return current >= start && current <= end;
+                            });
+
+                            const isDayOff =
+                                isHoliday ||
+                                isVacation ||
+                                schedule?.is_day_off;
+
+                            return {
+                                employee_id: emp.employee_id,
+                                employee_name: emp.employee_name,
+                                employee_image_url: emp.employee_image_url,
+                                is_active: emp.is_active,
+
+                                day_off: isDayOff,
+
+                                working_hours: {
+                                    open: schedule?.open_time?.slice(0, 5) || "09:00",
+                                    close: schedule?.close_time?.slice(0, 5) || "17:00",
+                                },
+
+                                appointments: appointmentsRes.rows.filter(
+                                    (a) => Number(a.employee_id) === Number(emp.employee_id)
+                                ),
+
+                                time_off: timeOffRes.rows.filter(
+                                    (t) => Number(t.employee_id) === Number(emp.employee_id)
+                                ),
+                            };
+                        });
+
+                    result.days[date] = { date, employees: dayEmployees };
+                })
+            );
+
+            res.json(result);
+        } catch (err) {
+            console.error("❌ Błąd /api/calendar/shared/multi:", err);
+            res.status(500).json({ error: err.message });
+        }
+    })
+);
+
+
+
+
+
+
+
+
+
+
+////koniec listy rezerwacji////
 
 // ✅ Drag & drop / aktualizacja terminu wizyty
 app.put(
@@ -5486,6 +5845,105 @@ app.get(
 
 
 
+
+
+app.post(
+    "/api/clients/create",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        let { salon_id, employee_ids, first_name, last_name, phone } = req.body;
+
+        // -------------------------------------------------------
+        // 1) KONWERSJA I AUTO-DETEKCJA SALONU
+        // -------------------------------------------------------
+        salon_id = Number(salon_id);
+
+        // Jeśli salon_id nie przyszło z frontu → sprawdzamy czy user jest pracownikiem
+        if (!salon_id) {
+            const emp = await pool.query(
+                "SELECT salon_id FROM employees WHERE uid = $1 LIMIT 1",
+                [req.user.uid]
+            );
+
+            if (emp.rows.length > 0) {
+                salon_id = emp.rows[0].salon_id; // zwykły pracownik
+            }
+        }
+
+        // Jeśli nadal brak → provider NIE wybrał salonu
+        if (!salon_id) {
+            return res.status(400).json({ error: "Brak salon_id" });
+        }
+
+        // -------------------------------------------------------
+        // 2) WALIDACJE
+        // -------------------------------------------------------
+        if (!Array.isArray(employee_ids) || employee_ids.length === 0)
+            return res.status(400).json({ error: "Musisz wybrać przynajmniej jednego pracownika" });
+
+        if (!first_name || !last_name)
+            return res.status(400).json({ error: "Imię i nazwisko są wymagane" });
+
+        const phoneTrimmed = String(phone || "").trim();
+        if (phoneTrimmed.length > 0 && !/^[0-9]{9}$/.test(phoneTrimmed)) {
+            return res.status(400).json({ error: "Numer telefonu musi mieć 9 cyfr" });
+        }
+
+        // -------------------------------------------------------
+        // 3) SPRAWDZANIE DUPLIKATU TELEFONU
+        // -------------------------------------------------------
+        const existing = await pool.query(
+            `
+            SELECT 
+                id, first_name, last_name, phone, employee_id
+            FROM salon_clients 
+            WHERE salon_id = $1 AND phone = $2
+            `,
+            [salon_id, phoneTrimmed]
+        );
+
+        if (existing.rows.length > 0) {
+            return res.status(409).json({
+                error: "Klient z takim numerem telefonu już istnieje",
+                existing_clients: existing.rows
+            });
+        }
+
+        // -------------------------------------------------------
+        // 4) TWORZENIE KLIENTÓW – po jednym per employee_id
+        // -------------------------------------------------------
+        const createdClients = [];
+
+        for (const empId of employee_ids) {
+            const insertRes = await pool.query(
+                `
+                INSERT INTO salon_clients (
+                    salon_id,
+                    employee_id,
+                    client_uid,
+                    first_name,
+                    last_name,
+                    phone,
+                    created_at
+                )
+                VALUES ($1, $2, NULL, $3, $4, $5, NOW())
+                RETURNING id, salon_id, employee_id, first_name, last_name, phone, created_at
+                `,
+                [salon_id, empId, first_name, last_name, phoneTrimmed]
+            );
+
+            createdClients.push(insertRes.rows[0]);
+        }
+
+        // -------------------------------------------------------
+        // 5) ODPOWIEDŹ
+        // -------------------------------------------------------
+        res.json({
+            success: true,
+            created: createdClients
+        });
+    })
+);
 
 
 

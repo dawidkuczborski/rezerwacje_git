@@ -3,6 +3,7 @@ import { Search, Phone, MessageCircle, ArrowLeft, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "../../components/AuthProvider";
 import NewAppointmentModal from "../../components/NewAppointmentModal";
+import AddClientModal from "../../components/AddClientModal";
 
 export default function Clients() {
     const { firebaseUser } = useAuth();
@@ -24,6 +25,7 @@ export default function Clients() {
 
     const [rebookModalOpen, setRebookModalOpen] = useState(false);
     const [rebookPrefill, setRebookPrefill] = useState(null);
+    const [addClientOpen, setAddClientOpen] = useState(false);
 
     const formatDate = (date) =>
         new Date(date).toLocaleDateString("pl-PL", {
@@ -137,11 +139,22 @@ export default function Clients() {
             {/* HEADER */}
             <div className="bg-[#e57b2c] dark:bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
                 {!selectedClient && (
-                    <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
-                        <Users size={24} />
-                        Klienci
-                    </h1>
+                    <div className="flex items-center justify-between">
+                        <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
+                            <Users size={24} />
+                            Klienci
+                        </h1>
+
+                        {/* BUTTON DODAJ KLIENTA */}
+                        <button
+                            onClick={() => setAddClientOpen(true)}
+                            className="bg-white/20 text-white px-4 py-2 rounded-xl text-sm backdrop-blur-md"
+                        >
+                            + Dodaj
+                        </button>
+                    </div>
                 )}
+
 
                 {selectedClient && (
                     <button
@@ -356,6 +369,18 @@ export default function Clients() {
                     else loadClients(true);
                 }}
             />
+
+            {addClientOpen && (
+                <AddClientModal
+                    open={addClientOpen}
+                    onClose={() => setAddClientOpen(false)}
+                    onCreated={() => {
+                        setAddClientOpen(false);
+                        loadClients(true);
+                    }}
+                />
+            )}
+
         </div>
     );
 }

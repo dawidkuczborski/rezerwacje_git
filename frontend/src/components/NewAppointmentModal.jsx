@@ -14,6 +14,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
         first_name: "",
         last_name: "",
         phone: "",
+        employee_ids: [],   // 👈 ważne
     });
 
     const [employees, setEmployees] = useState([]);
@@ -128,7 +129,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
             const params = {
                 employee_id: empId,
                 service_id: srvId,
-                date: toLocalDate(date), // FIX
+                date: toLocalDate(date),
             };
 
             if (addonList?.length) params.addons = addonList.join(",");
@@ -171,36 +172,73 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
     // ADD CLIENT
     // -------------------------
     const handleCreateClient = async () => {
-        const { first_name, last_name, phone } = newClient;
+        const { first_name, last_name, phone, employee_ids } = newClient;
 
-        if (!first_name && !last_name) {
-            alert("Podaj imię lub nazwisko");
+        if (!first_name || !last_name) {
+            alert("Podaj imię i nazwisko");
+            return;
+        }
+        if (!phone || phone.length !== 9) {
+            alert("Numer telefonu musi mieć dokładnie 9 cyfr");
+            return;
+        }
+        if (!Array.isArray(employee_ids) || employee_ids.length === 0) {
+            alert("Wybierz przynajmniej jednego pracownika");
             return;
         }
 
         try {
             setCreatingClient(true);
 
+            const salonIdRaw = localStorage.getItem("selected_salon_id");
+            const salon_id = salonIdRaw ? Number(salonIdRaw) : undefined;
+
             const res = await axios.post(
-                `${backendBase}/api/clients/create-local`,
-                newClient,
+                `${backendBase}/api/clients/create`,
                 {
-                    ...authHeaders(),
-                    params: { salon_id: localStorage.getItem("selected_salon_id") }
-                }
+                    salon_id,
+                    employee_ids,
+                    first_name,
+                    last_name,
+                    phone
+                },
+                authHeaders()
             );
 
-            const created = res.data?.client;
-
+            // nowy klient – bierzemy pierwszy z utworzonych
+            const created = res.data?.created?.[0];
             if (created?.id) {
                 setClients((prev) => normalizeClients([...prev, created]));
                 setForm((p) => ({ ...p, client_id: created.id }));
-                setShowNewClientForm(false);
-                setNewClient({ first_name: "", last_name: "", phone: "" });
             }
+
+            setShowNewClientForm(false);
+            setNewClient({
+                first_name: "",
+                last_name: "",
+                phone: "",
+                employee_ids: []
+            });
+
         } catch (err) {
             console.error("Błąd dodawania klienta:", err);
-            alert("Błąd podczas dodawania klienta");
+
+            // 409 – klient z takim numerem już istnieje
+            if (err.response?.status === 409 && err.response.data?.existing_clients?.length) {
+                const existing = err.response.data.existing_clients[0];
+                setClients((prev) => normalizeClients([...prev, existing]));
+                setForm((p) => ({ ...p, client_id: existing.id }));
+                setShowNewClientForm(false);
+                setNewClient({
+                    first_name: "",
+                    last_name: "",
+                    phone: "",
+                    employee_ids: []
+                });
+                return;
+            }
+
+            alert(err.response?.data?.error || "Błąd podczas dodawania klienta");
         } finally {
             setCreatingClient(false);
         }
@@ -222,7 +260,7 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                 `${backendBase}/api/appointments/create-from-panel`,
                 {
                     ...form,
-                    date: toLocalDate(form.date),  // FIX
+                    date: toLocalDate(form.date),
                     client_local_id: form.client_id
                 },
                 {
@@ -372,6 +410,8 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
 
                             {showNewClientForm && (
                                 <div className="p-3 mt-2 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700 space-y-2">
+
+                                    {/* Imię + nazwisko */}
                                     <div className="flex gap-2">
                                         <input
                                             className="flex-1 border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
@@ -391,15 +431,58 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                         />
                                     </div>
 
+                                    {/* Telefon */}
                                     <input
                                         className="w-full border rounded-lg p-2 text-sm dark:bg-gray-900 dark:border-gray-700"
-                                        placeholder="Telefon"
+                                        placeholder="Telefon (9 cyfr)"
                                         value={newClient.phone}
-                                        onChange={(e) =>
-                                            setNewClient({ ...newClient, phone: e.target.value })
-                                        }
+                                        onChange={(e) => {
+                                            const v = e.target.value.replace(/\D/g, "");
+                                            if (v.length <= 9) {
+                                                setNewClient({ ...newClient, phone: v });
+                                            }
+                                        }}
+                                        maxLength={9}
                                     />
 
+                                    {/* MULTISELECT PRACOWNIKÓW */}
+                                    <div className="space-y-2">
+                                        <div className="text-sm text-gray-600 dark:text-gray-300">
+                                            Przypisz do pracowników *
+                                        </div>
+
+                                        <div className="max-h-40 overflow-y-auto pr-1 space-y-1">
+                                            {employees.map((emp) => (
+                                                <label
+                                                    key={emp.id}
+                                                    className="flex items-center gap-2 p-2 rounded-lg bg-gray-100 dark:bg-gray-700 cursor-pointer"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={newClient.employee_ids?.includes(emp.id)}
+                                                        onChange={() => {
+                                                            setNewClient((prev) => {
+                                                                const arr = prev.employee_ids || [];
+                                                                return arr.includes(emp.id)
+                                                                    ? { ...prev, employee_ids: arr.filter((x) => x !== emp.id) }
+                                                                    : { ...prev, employee_ids: [...arr, emp.id] };
+                                                            });
+                                                        }}
+                                                    />
+
+                                                    {emp.name}
+                                                </label>
+                                            ))}
+                                        </div>
+
+                                        {(!newClient.employee_ids || newClient.employee_ids.length === 0) && (
+                                            <p className="text-xs text-red-400">
+                                                Wybierz przynajmniej jednego pracownika
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {/* Buttons */}
                                     <div className="flex justify-end gap-2">
                                         <button
                                             className="px-3 py-1 rounded-lg text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600"
@@ -416,8 +499,10 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                             {creatingClient ? "Dodaję..." : "Dodaj"}
                                         </button>
                                     </div>
+
                                 </div>
                             )}
+
                         </div>
 
                         {/* EMPLOYEE */}
@@ -441,7 +526,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </select>
                         </div>
 
-
                         {/* SERVICE */}
                         <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
                             <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Usługa *</label>
@@ -462,7 +546,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                 ))}
                             </select>
                         </div>
-
 
                         {/* ADDONS */}
                         <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
@@ -491,7 +574,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                             </div>
                         </div>
 
-
                         {/* DATE */}
                         <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
                             <label className="text-sm text-gray-500 dark:text-gray-400 self-start">Data *</label>
@@ -504,7 +586,6 @@ export default function NewAppointmentModal({ open, onClose, activeDay, onCreate
                                 onChange={(e) => setForm({ ...form, date: e.target.value })}
                             />
                         </div>
-
 
                         {/* TIME */}
                         <div className="border-b pb-4 dark:border-gray-700 flex flex-col items-center">
