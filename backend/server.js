@@ -6053,7 +6053,8 @@ app.post(
                     try {
                         console.log("🔔 [PUSH] Raw subscription:", row.subscription);
 
-                        const parsed = JSON.parse(row.subscription);
+                        const parsed = row.subscription; // już jest obiektem
+
                         console.log("🔔 [PUSH] Parsed subscription:", parsed);
 
                         // ⚠️ Safari i FCM akceptują TYLKO string – nic innego
