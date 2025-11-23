@@ -6074,8 +6074,64 @@ app.post(
                         appointment: apptRes.rows[0],
                     });
                 }
+
+
             } catch (err) {
                 console.error("⚠️ Nie udało się wysłać eventu calendar_updated (NEW):", err);
+            }
+
+
+            /* ------------------------------------------------------
+   🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
+------------------------------------------------------ */
+            try {
+                console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
+
+                // pobierz subskrypcje pracownika
+                const subs = await pool.query(
+                    "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                    [employee_id]
+                );
+
+                console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
+
+                if (subs.rows.length > 0) {
+                    const payload = {
+                        title: "Nowa rezerwacja",
+                        body: `Nowa wizyta: ${date} o ${start_time}`,
+                        url: "/employee/calendar"
+                    };
+
+                    for (const row of subs.rows) {
+                        try {
+                            console.log("🔔 [PUSH] Raw subscription:", row.subscription);
+
+                            const parsed = JSON.parse(row.subscription);
+                            console.log("🔔 [PUSH] Parsed subscription:", parsed);
+
+                            await webpush.sendNotification(
+                                parsed,
+                                JSON.stringify(payload)
+                            );
+
+                            console.log("✔️ [PUSH] Wysłano poprawnie");
+                        } catch (err) {
+                            console.error("❌ [PUSH ERROR] msg:", err.message);
+                            console.error("❌ status:", err.statusCode);
+
+                            // usuń martwe subskrypcje
+                            if (err.statusCode === 410 || err.statusCode === 404) {
+                                console.log("🗑 Usuwam martwą subskrypcję");
+                                await pool.query(
+                                    "DELETE FROM push_subscriptions WHERE subscription = $1",
+                                    [row.subscription]
+                                );
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("❌ GLOBAL PUSH ERROR:", err);
             }
 
             res.json({
