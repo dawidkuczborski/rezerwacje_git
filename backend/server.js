@@ -2941,11 +2941,14 @@ app.post(
 
             // 🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
             try {
-                // pobierz subskrypcje push tego pracownika (po employee_id)
+                console.log("🔔 [PUSH] START for employee_id:", employee_id);
+
                 const subs = await pool.query(
                     "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
-                    [employee_id]   // pracownik, do którego jest zapisana wizyta
+                    [employee_id]
                 );
+
+                console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
                 if (subs.rows.length > 0) {
                     const payload = {
@@ -2956,20 +2959,43 @@ app.post(
 
                     for (const row of subs.rows) {
                         try {
-                            await webpush.sendNotification(
-                                JSON.parse(row.subscription),
+                            console.log("🔔 [PUSH] Raw subscription string:", row.subscription);
+
+                            const subObject = JSON.parse(row.subscription);
+                            console.log("🔔 [PUSH] Parsed subscription:", subObject);
+
+                            console.log("🔔 [PUSH] Sending push...");
+                            const response = await webpush.sendNotification(
+                                subObject,
                                 JSON.stringify(payload)
                             );
 
+                            console.log("🔔 [PUSH] SUCCESS – response:", response);
 
                         } catch (err) {
-                            console.log("❌ Push send error:", err.message);
+                            console.error("❌ [PUSH ERROR] --------------------");
+                            console.error("❌ Message:", err.message);
+                            console.error("❌ Stack:", err.stack);
+                            console.error("❌ StatusCode:", err.statusCode);
+                            console.error("❌ Headers:", err.headers);
+                            console.error("❌ Body:", err.body);
+                            console.error("❌ [END PUSH ERROR] ----------------");
+
+                            // usuń martwe subskrypcje
+                            if (err.statusCode === 410 || err.statusCode === 404) {
+                                console.log("🗑 [PUSH] Removing dead subscription...");
+                                await pool.query(
+                                    "DELETE FROM push_subscriptions WHERE subscription = $1",
+                                    [row.subscription]
+                                );
+                            }
                         }
                     }
                 }
             } catch (err) {
-                console.log("❌ Błąd push:", err);
+                console.error("❌ GLOBAL PUSH ERROR:", err);
             }
+
 
 
 
