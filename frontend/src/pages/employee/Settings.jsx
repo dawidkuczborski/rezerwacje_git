@@ -11,10 +11,13 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "../../components/AuthProvider";
+import { useNavigate } from "react-router-dom";
 
 export default function PanelSettings() {
     const { firebaseUser, logout, backendUser } = useAuth();
     const backend = import.meta.env.VITE_API_URL;
+
+    const navigate = useNavigate();
 
     const [isProvider, setIsProvider] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -32,16 +35,13 @@ export default function PanelSettings() {
     };
 
     // ==========================
-    // LOGOUT (clean localStorage except theme)
+    // LOGOUT
     // ==========================
     const handleLogout = () => {
         const savedTheme = localStorage.getItem("theme");
-
         localStorage.clear();
 
-        if (savedTheme) {
-            localStorage.setItem("theme", savedTheme);
-        }
+        if (savedTheme) localStorage.setItem("theme", savedTheme);
 
         logout();
     };
@@ -55,7 +55,6 @@ export default function PanelSettings() {
     // ==========================
     const loadUserData = async () => {
         if (!firebaseUser) return;
-
         const token = await firebaseUser.getIdToken();
 
         const res = await fetch(`${backend}/api/auth/me`, {
@@ -82,10 +81,12 @@ export default function PanelSettings() {
             label: "Ustawienia salonu",
             icon: Settings,
             children: [
+                { id: "data", label: "Konfiguracja salonu" },
+                { id: "services", label: "Usługi salonu" },   
                 { id: "hours", label: "Godziny otwarcia" },
-                { id: "data", label: "Dane salonu" },
                 { id: "price", label: "Cennik" },
             ],
+
         },
         {
             id: "workers",
@@ -142,25 +143,19 @@ export default function PanelSettings() {
             id: "schedule",
             label: "Harmonogram",
             icon: CalendarDays,
-            children: [
-                { id: "myschedule", label: "Mój grafik" },
-            ],
+            children: [{ id: "myschedule", label: "Mój grafik" }],
         },
         {
             id: "notifications",
             label: "Powiadomienia",
             icon: Bell,
-            children: [
-                { id: "center", label: "Centrum powiadomień" },
-            ],
+            children: [{ id: "center", label: "Centrum powiadomień" }],
         },
         {
             id: "reports",
             label: "Raporty",
             icon: FileText,
-            children: [
-                { id: "myreports", label: "Moje raporty" },
-            ],
+            children: [{ id: "myreports", label: "Moje raporty" }],
         },
     ];
 
@@ -180,7 +175,7 @@ export default function PanelSettings() {
                 </h1>
             </div>
 
-            {/* WHITE CARD - like Vacations */}
+            {/* WHITE CARD */}
             <div className="-mt-6">
                 <div className="bg-white dark:bg-[#1a1a1a] rounded-t-[32px] px-6 py-6 shadow-sm">
 
@@ -231,14 +226,27 @@ export default function PanelSettings() {
                                             exit={{ opacity: 0, height: 0 }}
                                             className="pl-5 space-y-2 mt-2"
                                         >
-                                            {group.children.map((child) => (
-                                                <div
-                                                    key={child.id}
-                                                    className="bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-[15px] text-gray-700 dark:text-gray-300"
-                                                >
-                                                    {child.label}
-                                                </div>
-                                            ))}
+                                            {group.children.map((child) => {
+                                                const handleClick = () => {
+                                                    if (child.id === "data") {
+                                                        navigate("/employee/salon");
+                                                    }
+                                                    if (child.id === "services") {
+                                                        navigate("/employee/services"); 
+                                                    }
+
+                                                };
+
+                                                return (
+                                                    <div
+                                                        key={child.id}
+                                                        onClick={handleClick}
+                                                        className="bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-[15px] text-gray-700 dark:text-gray-300 cursor-pointer"
+                                                    >
+                                                        {child.label}
+                                                    </div>
+                                                );
+                                            })}
                                         </motion.div>
                                     )}
                                 </AnimatePresence>
@@ -255,9 +263,10 @@ export default function PanelSettings() {
                             Tryb: {theme === "light" ? "Jasny" : "Ciemny"}
                         </button>
 
+                        {/* 🔥 Pomarańczowy przycisk WYLOGUJ */}
                         <button
                             onClick={handleLogout}
-                            className="w-full bg-red-600 text-white rounded-2xl px-5 py-3 text-[16px] font-medium"
+                            className="w-full bg-[#e57b2c] text-white rounded-2xl px-5 py-3 text-[16px] font-medium"
                         >
                             Wyloguj się
                         </button>

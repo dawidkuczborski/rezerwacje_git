@@ -189,14 +189,16 @@ export default function AppointmentModal({ open, onClose, appointmentId, onUpdat
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={onClose}
-                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-end"
+                className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10050] flex items-end"
+
             >
                 <motion.div
                     initial={{ y: 80 }}
                     animate={{ y: 0 }}
                     exit={{ y: 80 }}
                     onClick={(e) => e.stopPropagation()}
-                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col"
+                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col relative z-[10051]"
+
                 >
                     {/* SAVED POPUP */}
                     {savedPopup && (

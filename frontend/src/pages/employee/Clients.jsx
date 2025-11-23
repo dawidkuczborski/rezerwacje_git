@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+﻿import { useEffect, useState, useRef } from "react";
 import { Search, Phone, MessageCircle, ArrowLeft, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "../../components/AuthProvider";
@@ -26,6 +26,8 @@ export default function Clients() {
     const [rebookModalOpen, setRebookModalOpen] = useState(false);
     const [rebookPrefill, setRebookPrefill] = useState(null);
     const [addClientOpen, setAddClientOpen] = useState(false);
+    const wrapperRef = useRef(null);
+
 
     const formatDate = (date) =>
         new Date(date).toLocaleDateString("pl-PL", {
@@ -104,6 +106,14 @@ export default function Clients() {
         if (page > 1) loadClients();
     }, [page]);
 
+    // --- SCROLL NA GÓRĘ PO WEJŚCIU W KLIENTA ---
+    useEffect(() => {
+        if (selectedClient) {
+            window.scrollTo(0, 0);
+        }
+    }, [selectedClient]);
+
+
     const loadMore = () => {
         if (clients.length < total) setPage((p) => p + 1);
     };
@@ -120,6 +130,15 @@ export default function Clients() {
         const data = await res.json();
         setSelectedClient(data);
     };
+    useEffect(() => {
+        if (selectedClient && wrapperRef.current) {
+            wrapperRef.current.scrollTo({
+                top: 0,
+                behavior: "instant",
+            });
+        }
+    }, [selectedClient]);
+
 
     const openRebookModal = (appointment) => {
         setRebookPrefill({
@@ -135,7 +154,11 @@ export default function Clients() {
     };
 
     return (
-        <div className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]">
+        <div
+            ref={wrapperRef}
+            className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]"
+        >
+
             {/* HEADER */}
             <div className="bg-[#e57b2c] dark:bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
                 {!selectedClient && (

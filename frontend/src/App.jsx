@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "r
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
+import ScrollToTop from "./components/ScrollToTop";
+
 
 // NOWE: jedna strona logowania
 import Login from "./pages/Login";
@@ -28,6 +30,7 @@ import ScheduleManager from "./pages/ScheduleManager";
 import PortfolioManager from "./pages/PortfolioManager";
 import ChooseSalon from "./pages/ChooseSalon";
 
+
 // Panel pracownika
 import EmployeeCalendar from "./pages/employee/EmployeeCalendar";
 import EmployeeCalendarMonthView from "./pages/employee/EmployeeCalendarMonthView";
@@ -35,6 +38,7 @@ import Vacations from "./pages/employee/Vacations";
 import Clients from "./pages/employee/Clients";
 import Settings from "./pages/employee/Settings";
 import Reservations from "./pages/employee/Reservations";
+
 
 function AppRoutes() {
     const { firebaseUser, backendUser, loading } = useAuth();
@@ -205,7 +209,7 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/salon"
+                path="/employee/salon"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <SalonManager />
@@ -227,7 +231,7 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/services"
+                path="/employee/services"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <ServicesManager />
@@ -355,6 +359,9 @@ function AppLayout() {
 
     return (
         <>
+            {/* 👇 DODANE TUTAJ */}
+            <ScrollToTop />
+
             <div className="pb-[70px] transition-colors duration-500">
                 <AppRoutes />
             </div>

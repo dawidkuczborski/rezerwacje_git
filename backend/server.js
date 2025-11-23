@@ -4489,6 +4489,218 @@ app.put(
     })
 );
 
+///dodati////
+// ================================
+//   GET ALL ADDONS FOR A SALON
+// ================================
+app.get(
+    "/api/service-addons/all",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { salon_id } = req.query;
+
+        if (!salon_id) return res.status(400).json({ error: "Brak salon_id" });
+
+        // sprawdz właściciela
+        const salonCheck = await pool.query(
+            "SELECT id FROM salons WHERE id=$1 AND owner_uid=$2",
+            [salon_id, req.user.uid]
+        );
+        if (salonCheck.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu do salonu" });
+
+        const result = await pool.query(
+            `SELECT * FROM service_addons
+             WHERE salon_id=$1 AND is_active=true
+             ORDER BY name`,
+            [salon_id]
+        );
+
+        res.json(result.rows);
+    })
+);
+
+
+// ================================
+//       CREATE ADDON (NO IMAGE)
+// ================================
+app.post(
+    "/api/service-addons",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { name, salon_id, duration_minutes, price, description } = req.body;
+
+        if (!name || !salon_id || !price)
+            return res.status(400).json({ error: "Brak wymaganych danych" });
+
+        const salonCheck = await pool.query(
+            "SELECT id FROM salons WHERE id=$1 AND owner_uid=$2",
+            [salon_id, req.user.uid]
+        );
+        if (salonCheck.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu do salonu" });
+
+        const result = await pool.query(
+            `INSERT INTO service_addons (salon_id, name, duration_minutes, price, description)
+             VALUES ($1,$2,$3,$4,$5)
+             RETURNING *`,
+            [salon_id, name, duration_minutes, price, description]
+        );
+
+        res.json({ message: "➕ Dodatek dodany", addon: result.rows[0] });
+    })
+);
+
+
+// ================================
+//       UPDATE ADDON (NO IMAGE)
+// ================================
+app.put(
+    "/api/service-addons/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const { name, duration_minutes, price, description } = req.body;
+
+        const addonCheck = await pool.query(
+            `SELECT a.id
+             FROM service_addons a
+             JOIN salons s ON a.salon_id = s.id
+             WHERE a.id=$1 AND s.owner_uid=$2`,
+            [id, req.user.uid]
+        );
+        if (addonCheck.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu" });
+
+        const result = await pool.query(
+            `UPDATE service_addons
+             SET name=$1, duration_minutes=$2, price=$3, description=$4
+             WHERE id=$5
+             RETURNING *`,
+            [name, duration_minutes, price, description, id]
+        );
+
+        res.json({ message: "✏️ Dodatek zaktualizowany", addon: result.rows[0] });
+    })
+);
+
+
+// ================================
+//        DELETE ADDON (SOFT)
+// ================================
+app.delete(
+    "/api/service-addons/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        const addonCheck = await pool.query(
+            `SELECT a.id
+             FROM service_addons a
+             JOIN salons s ON a.salon_id=s.id
+             WHERE a.id=$1 AND s.owner_uid=$2`,
+            [id, req.user.uid]
+        );
+        if (addonCheck.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu" });
+
+        await pool.query(`UPDATE service_addons SET is_active=false WHERE id=$1`, [id]);
+
+        res.json({ message: "🗑️ Dodatek usunięty" });
+    })
+);
+
+
+// ================================
+//   LINK ADDONS TO A SERVICE
+// ================================
+app.post(
+    "/api/services/:serviceId/addons",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { serviceId } = req.params;
+        const { addon_ids } = req.body;
+
+        if (!Array.isArray(addon_ids))
+            return res.status(400).json({ error: "addon_ids musi być tablicą" });
+
+        const serviceCheck = await pool.query(
+            `SELECT s.id, s.salon_id
+             FROM services s
+             JOIN salons sa ON s.salon_id = sa.id
+             WHERE s.id=$1 AND sa.owner_uid=$2`,
+            [serviceId, req.user.uid]
+        );
+        if (serviceCheck.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu do usługi" });
+
+        // usuń stare powiązania
+        await pool.query(`DELETE FROM service_addon_links WHERE service_id=$1`, [serviceId]);
+
+        // dodaj nowe
+        for (const addonId of addon_ids) {
+            await pool.query(
+                `INSERT INTO service_addon_links (service_id, addon_id)
+                 VALUES ($1,$2)`,
+                [serviceId, addonId]
+            );
+        }
+
+        res.json({ message: "🔗 Powiązania zapisane" });
+    })
+);
+
+
+// ================================
+//    GET ADDONS LINKED TO SERVICE
+// ================================
+app.get(
+    "/api/services/:serviceId/addons",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { serviceId } = req.params;
+
+        const addons = await pool.query(
+            `SELECT a.*
+             FROM service_addons a
+             JOIN service_addon_links l ON l.addon_id = a.id
+             WHERE l.service_id = $1 AND a.is_active=true
+             ORDER BY a.name`,
+            [serviceId]
+        );
+
+        res.json(addons.rows);
+    })
+);
+
+
+// ================================
+//   DELETE A SINGLE LINK
+// ================================
+app.delete(
+    "/api/service-addon-links/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        await pool.query(`DELETE FROM service_addon_links WHERE id=$1`, [id]);
+
+        res.json({ message: "❌ Powiązanie usunięte" });
+    })
+);
+
+
+///dodatki////
+
+
+
 // Get services for owner (mine)
 app.get(
     "/api/services/mine",
