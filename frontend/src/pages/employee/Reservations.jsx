@@ -224,16 +224,25 @@ export default function Reservations() {
         setInitialLoaded(true);
     }, [firebaseUser, initialLoaded, loadDays]);
 
-    // ----------------- SOCKET REFRESH -----------------
+    // ----------------- SOCKET REFRESH (poprawiony) -----------------
     useEffect(() => {
         if (!firebaseUser) return;
-        const handler = () => {
+
+        const handler = async () => {
+            console.log("🔁 LIVE REFRESH (reservations list)");
+
+            // pobieramy wszystkie aktualnie załadowane dni
             const allDates = days.map((d) => d.date);
-            if (allDates.length) loadDays(allDates);
+
+            if (allDates.length > 0) {
+                await loadDays(allDates);
+            }
         };
+
         socket.on("calendar_updated", handler);
         return () => socket.off("calendar_updated", handler);
-    }, [firebaseUser, days, loadDays]);
+    }, [firebaseUser, days]);
+
 
     // ----------------- AUTOSCROLL (WINDOW) -----------------
     useEffect(() => {
@@ -434,25 +443,33 @@ export default function Reservations() {
                                                                 </div>
                                                             </div>
 
-                                                            <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-1 truncate">
-                                                                {formatHHMM(
-                                                                    a.start_time
-                                                                )}{" "}
-                                                                • {duration} min •{" "}
-                                                                {a.service_name}
-                                                                {a.addons &&
-                                                                    a.addons.trim() !==
-                                                                    "" && (
-                                                                        <> • {a.addons}</>
-                                                                    )}
+                                                            <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-1">
+                                                                {/* Czas od–do */}
+                                                                <div>
+                                                                    {formatHHMM(a.start_time)} – {formatHHMM(a.end_time)} • {duration} min
+                                                                </div>
+
+                                                                {/* Usługa główna */}
+                                                                <div>{a.service_name}</div>
+
+                                                                {/* Dodatki w kolumnie */}
+                                                                {a.addons && a.addons.trim() !== "" && (
+                                                                    <div className="flex flex-col gap-[2px] mt-1">
+                                                                        {a.addons.split(",").map((addon, idx) => (
+                                                                            <div key={idx} className="before:content-['•_']">
+                                                                                {addon.trim()}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
 
+
+
                                                             <div className="text-[12px] text-gray-400 dark:text-gray-500">
-                                                                {
-                                                                    a._employee
-                                                                        .employee_name
-                                                                }
+                                                                Pracownik: {a._employee.employee_name}
                                                             </div>
+
                                                         </div>
                                                     </motion.button>
                                                 );
