@@ -279,6 +279,7 @@ export default function PanelSettings() {
                                                     if (child.id === "assign") navigate("/employee/assign");
                                                     if (child.id === "schedule") navigate("/employee/schedule");
                                                     if (child.id === "vacations") navigate("/employee/vacations");
+                                                    if (child.id === "center") navigate("/employee/notifications");
                                                 };
 
                                                 return (
@@ -292,7 +293,7 @@ export default function PanelSettings() {
                                                 );
                                             })}
 
-                                            {/* 🔥 DODAJ TO — tylko jeśli to sekcja Powiadomienia */}
+                                            {/* ⭐ PRZYCISK AKTYWACJI POWIADOMIEŃ */}
                                             {group.id === "notifications" && (
                                                 <div
                                                     onClick={enablePushNotifications}
@@ -303,6 +304,7 @@ export default function PanelSettings() {
                                             )}
                                         </motion.div>
                                     )}
+
 
                                 </AnimatePresence>
                             </div>

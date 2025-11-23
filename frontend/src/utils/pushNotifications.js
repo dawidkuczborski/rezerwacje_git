@@ -1,58 +1,81 @@
-﻿// src/utils/pushNotifications.js
+﻿// 🔧 Konwersja klucza publicznego VAPID (base64 → UInt8Array)
+const base64UrlToUint8Array = (base64UrlData) => {
+    const padding = "=".repeat((4 - base64UrlData.length % 4) % 4);
+    const base64 = (base64UrlData + padding)
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
 
-// konwersja VAPID public key → Uint8Array
-function urlBase64ToUint8Array(base64String) {
-  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, "+")
-    .replace(/_/g, "/");
+    const rawData = atob(base64);
+    const buffer = new Uint8Array(rawData.length);
 
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; ++i) {
+        buffer[i] = rawData.charCodeAt(i);
+    }
 
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
+    return buffer;
+};
 
-  return outputArray;
+/**
+ * 🔔 SUBSKRYPCJA PUSH
+ * - działa na iPhone + Android + Desktop
+ */
+export async function subscribeToPush(publicKey, employeeId) {
+    try {
+        // 1. Sprawdź wsparcie
+        if (!("serviceWorker" in navigator)) {
+            alert("Twoja przeglądarka nie obsługuje powiadomień.");
+            return null;
+        }
+
+        // 2. Poproś o pozwolenie
+        const permission = await Notification.requestPermission();
+
+        if (permission !== "granted") {
+            alert("Musisz zezwolić na powiadomienia.");
+            return null;
+        }
+
+        // 3. Poczekaj aż SW się załaduje
+        const registration = await navigator.serviceWorker.ready;
+
+        // 4. Subskrypcja na push
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: base64UrlToUint8Array(publicKey),
+        });
+
+        console.log("🔔 SUBSKRYPCJA PUSH:", subscription);
+
+        // 5. Wyślij subskrypcję do backendu
+        await fetch(import.meta.env.VITE_API_URL + "/push/subscribe", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                employee_id: employeeId,
+                subscription,
+            }),
+        });
+
+        alert("Powiadomienia zostały włączone!");
+        return subscription;
+    } catch (err) {
+        console.error("❌ błąd subskrypcji:", err);
+        alert("Błąd podczas subskrypcji powiadomień.");
+        return null;
+    }
 }
 
-export async function subscribeToPush() {
-  try {
-    // 1. sprawdź SW
-    const sw = await navigator.serviceWorker.ready;
+/**
+ * ❌ WYŁĄCZ SUBSKRYPCJĘ PUSH
+ */
+export async function unsubscribeFromPush() {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
 
-    // 2. pobierz publiczny klucz VAPID z backendu
-    const vapidRes = await fetch(`${import.meta.env.VITE_API_URL}/vapid/public`);
-    const { key } = await vapidRes.json();
-
-    const convertedKey = urlBase64ToUint8Array(key);
-
-    // 3. poproś o subskrypcję
-    const subscription = await sw.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: convertedKey,
-    });
-
-    console.log("🔔 Subskrypcja PUSH:", subscription);
-
-    // 4. wyślij subskrypcję do backendu
-    const token = localStorage.getItem("token");
-
-    await fetch(`${import.meta.env.VITE_API_URL}/push/subscribe`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: token ? `Bearer ${token}` : "",
-      },
-      body: JSON.stringify({ subscription }),
-    });
-
-    console.log("✔ Subskrypcja zapisana na backendzie");
-    return true;
-
-  } catch (err) {
-    console.error("❌ Push subscribe error:", err);
-    return false;
-  }
+    if (subscription) {
+        await subscription.unsubscribe();
+        alert("Powiadomienia wyłączone.");
+    }
 }

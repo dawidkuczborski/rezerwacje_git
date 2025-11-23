@@ -4,23 +4,22 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 
-// Rejestracja Service Workera
+import axios from "axios";
+import { getAuth, signOut } from "firebase/auth";
+
+// 🔥 1. REJESTRACJA SERVICE WORKERA (dla PWA + push)
 if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
         navigator.serviceWorker
             .register("/service-worker.js")
             .then((reg) => {
-                console.log("Service Worker zarejestrowany:", reg);
+                console.log("✔ Service Worker zarejestrowany:", reg.scope);
             })
-            .catch((err) => console.error("SW error:", err));
+            .catch((err) => console.error("❌ SW error:", err));
     });
 }
 
-
-import axios from "axios";
-import { getAuth, signOut } from "firebase/auth";
-
-// 🔥 GLOBAL AXIOS INTERCEPTOR — działa w całej aplikacji
+// 🔥 2. GLOBAL AXIOS INTERCEPTOR — działa w całej aplikacji
 axios.interceptors.response.use(
     (response) => response,
     (error) => {
@@ -57,9 +56,9 @@ axios.interceptors.response.use(
             return;
         }
 
-
         return Promise.reject(error);
     }
 );
 
+// 🔥 3. START APLIKACJI
 createRoot(document.getElementById("root")).render(<App />);

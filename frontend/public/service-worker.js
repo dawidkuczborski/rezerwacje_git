@@ -1,43 +1,46 @@
-﻿// public/service-worker.js
-
+﻿// ======== PUSH EVENT ========
 self.addEventListener("push", (event) => {
+    console.log("[SW] Push odebrany:", event.data?.text());
+
     let data = {};
+
     try {
-        data = event.data ? event.data.json() : {};
+        data = event.data.json();
     } catch (e) {
-        console.error("Push data parse error", e);
+        // np. Safari wysyła czysty tekst
+        data = { title: "Powiadomienie", body: event.data.text() };
     }
 
     const title = data.title || "Nowe powiadomienie";
     const options = {
         body: data.body || "",
-        icon: "/icons/icon-192.png",   // możesz podmienić lub na razie olać
-        badge: "/icons/icon-192.png",  // jak nie masz, i tak zadziała
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
         data: {
-            url: data.url || "/",
-        },
+            url: data.url || "/"
+        }
     };
 
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// ======== KLIKNIĘCIE POWIADOMIENIA ========
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
 
-    const urlToOpen = event.notification.data?.url || "/";
+    const url = event.notification.data?.url || "/";
 
     event.waitUntil(
         clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
-            // jeśli jakaś karta już otwarta → fokus
             for (const client of clientList) {
                 if ("focus" in client) {
-                    client.navigate(urlToOpen);
+                    client.navigate(url);
                     return client.focus();
                 }
             }
-            // inaczej otwórz nową
+
             if (clients.openWindow) {
-                return clients.openWindow(urlToOpen);
+                return clients.openWindow(url);
             }
         })
     );
