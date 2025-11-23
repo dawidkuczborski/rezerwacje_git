@@ -763,12 +763,18 @@ app.post(
 
         for (const row of rows.rows) {
             try {
-                await webpush.sendNotification(
-                    JSON.parse(row.subscription),
-                    JSON.stringify({ title, body, url })
-                );
+                const sub =
+                    typeof row.subscription === "string"
+                        ? JSON.parse(row.subscription)
+                        : row.subscription;
 
+                const payloadString = JSON.stringify({
+                    title: String(title || ""),
+                    body: String(body || ""),
+                    url: String(url || "/")
+                });
 
+                await webpush.sendNotification(sub, payloadString);
             } catch (err) {
                 console.log("❌ Push send error:", err.message);
             }
