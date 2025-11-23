@@ -6,15 +6,16 @@ export default defineConfig({
     plugins: [
         react(),
 
+        // PWA BEZ SERVICE WORKERA – manifest + ikony działają,
+        // ale nie generuje sw.js ani workbox!
         VitePWA({
             registerType: "autoUpdate",
 
-            // ❗ WYŁĄCZAMY WORKBOX SERVICE WORKER
-            workbox: null,
-            injectRegister: null, // NIE generuj registerSW.js
-            strategies: "injectManifest", // NIE używaj workbox-sw
+            // WYŁĄCZAMY WSZYSTKIE FUNKCJE SERVICE WORKERA
+            workbox: false,
+            injectRegister: false,
 
-            // Zostawiamy tylko manifest — PWA nadal działa
+            // Zostaje tylko manifest
             manifest: {
                 name: "BarberBook",
                 short_name: "BarberBook",
