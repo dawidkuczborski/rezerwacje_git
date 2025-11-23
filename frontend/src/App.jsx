@@ -24,6 +24,7 @@ import ProfileClient from "./pages/ProfileClient.jsx";
 import Profile from "./pages/Profile";
 import SalonManager from "./pages/SalonManager";
 import EmployeeManager from "./pages/EmployeeManager";
+import SalonHolidaysManager from "./pages/SalonHolidaysManager";
 import ServicesManager from "./pages/ServicesManager";
 import EmployeeServicesManager from "./pages/EmployeeServicesManager";
 import ScheduleManager from "./pages/ScheduleManager";
@@ -220,7 +221,7 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/employees"
+                path="/employee/employees"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <EmployeeManager />
@@ -242,7 +243,7 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/assign"
+                path="/employee/assign"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <EmployeeServicesManager />
@@ -253,7 +254,7 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/schedule"
+                path="/employee/schedule"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <ScheduleManager />
@@ -264,10 +265,20 @@ function AppRoutes() {
             />
 
             <Route
-                path="/panel/portfolio"
+                path="/employee/portfolio"
                 element={
                     isLoggedIn && backendUser?.is_provider ? (
                         <PortfolioManager />
+                    ) : (
+                        <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+            <Route
+                path="/employee/SalonHolidaysManager"
+                element={
+                    isLoggedIn && backendUser?.is_provider ? (
+                        <SalonHolidaysManager />
                     ) : (
                         <Navigate to={redirectByRole()} replace />
                     )

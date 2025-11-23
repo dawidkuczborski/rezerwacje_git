@@ -4,6 +4,19 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 
+// Rejestracja Service Workera
+if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+        navigator.serviceWorker
+            .register("/service-worker.js")
+            .then((reg) => {
+                console.log("Service Worker zarejestrowany:", reg);
+            })
+            .catch((err) => console.error("SW error:", err));
+    });
+}
+
+
 import axios from "axios";
 import { getAuth, signOut } from "firebase/auth";
 

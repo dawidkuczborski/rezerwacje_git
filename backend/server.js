@@ -6,6 +6,7 @@ import admin from "firebase-admin";
 import pkg from "pg";
 import fs from "fs";
 import path from "path";
+import webpush from "web-push";
 import multer from "multer";
 import { fileURLToPath } from "url";
 import crypto from "crypto";
@@ -13,6 +14,14 @@ import { pathToRegexp } from "path-to-regexp";
 
 dotenv.config();
 const { Pool } = pkg;
+
+
+// -------------------- WEB PUSH INIT --------------------
+webpush.setVapidDetails(
+    "mailto:admin@yourapp.com",
+    process.env.VAPID_PUBLIC,
+    process.env.VAPID_PRIVATE
+);
 
 
 const loginLocks = new Map();
@@ -348,6 +357,17 @@ const initTables = async () => {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_service_addons_id ON service_addons (id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_employee_services_service ON employee_services (service_id)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_salon_holidays_salon_date ON salon_holidays (salon_id, date)`);
+
+
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id SERIAL PRIMARY KEY,
+        employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+        subscription JSON NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+`);
+
 
     console.log("✅ Tables and indexes ensured");
 };
@@ -687,6 +707,76 @@ app.put(
         res.json({ message: "✅ Profil zaktualizowany", user: result.rows[0] });
     })
 );
+
+
+// -------------------- WEB PUSH PUBLIC KEY --------------------
+app.get("/vapid/public", (req, res) => {
+    res.json({ key: process.env.VAPID_PUBLIC });
+});
+// -------------------- WEB PUSH SUBSCRIBE --------------------
+app.post(
+    "/push/subscribe",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const { subscription } = req.body;
+        const uid = req.user?.uid;
+
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        // znajdź pracownika po UID
+        const empRes = await pool.query(
+            "SELECT id FROM employees WHERE uid=$1",
+            [uid]
+        );
+
+        if (empRes.rows.length === 0) {
+            return res.status(403).json({
+                error: "Tylko pracownik może subskrybować powiadomienia"
+            });
+        }
+
+        const employeeId = empRes.rows[0].id;
+
+        await pool.query(
+            `INSERT INTO push_subscriptions (employee_id, subscription)
+             VALUES ($1, $2)`,
+            [employeeId, subscription]
+        );
+
+        res.json({ success: true });
+    })
+);
+// -------------------- WEB PUSH SEND --------------------
+app.post(
+    "/push/send",
+    asyncHandler(async (req, res) => {
+        const { employee_id, title, body, url } = req.body;
+
+        if (!employee_id || !title) {
+            return res.status(400).json({ error: "Brak wymaganych danych" });
+        }
+
+        const rows = await pool.query(
+            "SELECT subscription FROM push_subscriptions WHERE employee_id=$1",
+            [employee_id]
+        );
+
+        for (const row of rows.rows) {
+            try {
+                await webpush.sendNotification(
+                    row.subscription,
+                    JSON.stringify({ title, body, url })
+                );
+            } catch (err) {
+                console.log("❌ Push send error:", err.message);
+            }
+        }
+
+        res.json({ success: true, sent: rows.rows.length });
+    })
+);
+
+
 // 🔍 Ultra-fast Advanced salon search (optimized)
 app.get(
     "/api/salons/search",
@@ -2847,6 +2937,38 @@ app.post(
                 appointment: newAppt,
             });
 
+            // 🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
+            try {
+                // pobierz subskrypcje push tego pracownika (po employee_id)
+                const subs = await pool.query(
+                    "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                    [employee_id]   // pracownik, do którego jest zapisana wizyta
+                );
+
+                if (subs.rows.length > 0) {
+                    const payload = {
+                        title: "Nowa rezerwacja",
+                        body: `Nowa wizyta: ${date} o ${start_time}`,
+                        url: "/employee/calendar"
+                    };
+
+                    for (const row of subs.rows) {
+                        try {
+                            await webpush.sendNotification(
+                                row.subscription,              // to już jest OBIEKT
+                                JSON.stringify(payload)        // body push-a
+                            );
+                        } catch (err) {
+                            console.log("❌ Push send error:", err.message);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.log("❌ Błąd push:", err);
+            }
+
+
+
             res.json({
                 message: "Wizyta utworzona",
                 appointment: newAppt,
@@ -4698,6 +4820,118 @@ app.delete(
 
 
 ///dodatki////
+
+
+////dni wolne///
+app.get(
+    "/api/salons/:salonId/holidays",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { salonId } = req.params;
+
+        // sprawdź właściciela
+        const check = await pool.query(
+            "SELECT id FROM salons WHERE id=$1 AND owner_uid=$2",
+            [salonId, req.user.uid]
+        );
+        if (check.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu do salonu" });
+
+        const result = await pool.query(
+            `SELECT * FROM salon_holidays 
+             WHERE salon_id=$1 
+             ORDER BY date ASC`,
+            [salonId]
+        );
+
+        res.json(result.rows);
+    })
+);
+app.post(
+    "/api/salons/:salonId/holidays",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { salonId } = req.params;
+        const { date, reason } = req.body;
+
+        if (!date) return res.status(400).json({ error: "Brak daty" });
+
+        // sprawdź właściciela
+        const check = await pool.query(
+            "SELECT id FROM salons WHERE id=$1 AND owner_uid=$2",
+            [salonId, req.user.uid]
+        );
+        if (check.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu do salonu" });
+
+        const result = await pool.query(
+            `INSERT INTO salon_holidays (salon_id, date, reason)
+             VALUES ($1, $2, $3)
+             RETURNING *`,
+            [salonId, date, reason]
+        );
+
+        res.json({ message: "🎉 Dzień wolny dodany", holiday: result.rows[0] });
+    })
+);
+app.put(
+    "/api/salon-holidays/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const { date, reason } = req.body;
+
+        const check = await pool.query(
+            `SELECT h.id 
+             FROM salon_holidays h
+             JOIN salons s ON s.id = h.salon_id
+             WHERE h.id=$1 AND s.owner_uid=$2`,
+            [id, req.user.uid]
+        );
+
+        if (check.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu" });
+
+        const result = await pool.query(
+            `UPDATE salon_holidays 
+             SET date=$1, reason=$2 
+             WHERE id=$3 
+             RETURNING *`,
+            [date, reason, id]
+        );
+
+        res.json({ message: "✏️ Dzień wolny zaktualizowany", holiday: result.rows[0] });
+    })
+);
+app.delete(
+    "/api/salon-holidays/:id",
+    verifyToken,
+    requireProviderRole,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
+
+        const check = await pool.query(
+            `SELECT h.id 
+             FROM salon_holidays h
+             JOIN salons s ON s.id=h.salon_id
+             WHERE h.id=$1 AND s.owner_uid=$2`,
+            [id, req.user.uid]
+        );
+
+        if (check.rows.length === 0)
+            return res.status(403).json({ error: "Brak dostępu" });
+
+        await pool.query("DELETE FROM salon_holidays WHERE id=$1", [id]);
+
+        res.json({ message: "🗑️ Dzień wolny usunięty" });
+    })
+);
+
+
+///dni wolne///
 
 
 

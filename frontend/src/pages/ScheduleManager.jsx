@@ -1,355 +1,401 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../components/AuthProvider";
 import axios from "axios";
+import { Clock3, Edit3 } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function ScheduleManager() {
-  const { firebaseUser } = useAuth();
-  const backendBase = import.meta.env.VITE_API_URL;
+    const { firebaseUser } = useAuth();
+    const backendBase = import.meta.env.VITE_API_URL;
 
-  const [tab, setTab] = useState("hours"); // "hours" | "holidays" | "vacations"
-  const [schedule, setSchedule] = useState([]);
-  const [holidays, setHolidays] = useState([]);
-  const [vacations, setVacations] = useState([]);
-  const [employees, setEmployees] = useState([]);
-  const [selectedEmployee, setSelectedEmployee] = useState("");
-  const [msg, setMsg] = useState("");
+    const [salons, setSalons] = useState([]);
+    const [selectedSalon, setSelectedSalon] = useState(null);
 
-  const days = [
-    "Niedziela",
-    "Poniedziałek",
-    "Wtorek",
-    "Środa",
-    "Czwartek",
-    "Piątek",
-    "Sobota",
-  ];
+    const [employees, setEmployees] = useState([]);
+    const [selectedEmployee, setSelectedEmployee] = useState(null);
 
-  // 🧭 Pomocnicze formatowanie dat
-  const fmtDate = (d) => {
-    if (!d) return null;
-    const dt = new Date(d);
-    return dt.toISOString().split("T")[0]; // YYYY-MM-DD
-  };
+    const [schedule, setSchedule] = useState([]);
+    const [showScheduleForm, setShowScheduleForm] = useState(false);
 
-  const prettyDate = (d) => {
-    try {
-      return new Date(d).toLocaleDateString("pl-PL", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        weekday: "long",
-      });
-    } catch {
-      return d;
-    }
-  };
+    const [msg, setMsg] = useState("");
+    const [loading, setLoading] = useState(false);
 
-  // 🔹 Ładowanie pracowników
-  useEffect(() => {
-    if (!firebaseUser) return;
-    const loadEmployees = async () => {
-      try {
-        const token = await firebaseUser.getIdToken();
-        const emp = await axios.get(`${backendBase}/api/employees/mine`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setEmployees(emp.data);
-      } catch (err) {
-        console.error("❌ Błąd ładowania pracowników:", err);
-      }
+    const days = [
+        "Niedziela",
+        "Poniedziałek",
+        "Wtorek",
+        "Środa",
+        "Czwartek",
+        "Piątek",
+        "Sobota",
+    ];
+
+    const normalizeTime = (t) => {
+        if (!t) return "";
+        // jeśli z bazy przychodzi np. "09:00:00" to obcinamy do "09:00"
+        if (t.length >= 5) return t.slice(0, 5);
+        return t;
     };
-    loadEmployees();
-  }, [firebaseUser]);
 
-  // 🔹 Ładowanie świąt i urlopów
-  useEffect(() => {
-    if (!firebaseUser) return;
-    const loadExtras = async () => {
-      try {
-        const token = await firebaseUser.getIdToken();
-        const [hol, vac] = await Promise.all([
-          axios.get(`${backendBase}/api/schedule/holidays`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-          axios.get(`${backendBase}/api/schedule/vacations`, {
-            headers: { Authorization: `Bearer ${token}` },
-          }),
-        ]);
-        setHolidays(hol.data);
-        setVacations(vac.data);
-      } catch (err) {
-        console.error("❌ Błąd ładowania dni wolnych lub urlopów:", err);
-        setMsg("❌ Błąd ładowania dni wolnych lub urlopów");
-      }
+    // --- Pobierz salony właściciela ---
+    const loadSalons = async () => {
+        try {
+            const token = await firebaseUser.getIdToken();
+            const resp = await axios.get(`${backendBase}/api/salons/mine/all`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            setSalons(resp.data || []);
+        } catch (err) {
+            console.error("❌ Błąd pobierania salonów:", err);
+        }
     };
-    loadExtras();
-  }, [firebaseUser]);
 
-  // 🔹 Ładowanie harmonogramu
-  const loadSchedule = async (employeeId) => {
-    try {
-      const token = await firebaseUser.getIdToken();
-      const res = await axios.get(`${backendBase}/api/schedule/employee/${employeeId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+    // --- Pobierz pracowników wybranego salonu ---
+    const loadEmployees = async (salonId) => {
+        if (!salonId) return;
+        try {
+            const token = await firebaseUser.getIdToken();
+            const resp = await axios.get(`${backendBase}/api/employees/mine`, {
+                headers: { Authorization: `Bearer ${token}` },
+                params: { salon_id: salonId },
+            });
+            setEmployees(resp.data || []);
+        } catch (err) {
+            console.error("❌ Błąd ładowania pracowników:", err);
+        }
+    };
 
-      if (res.data.length) {
-        setSchedule(res.data);
-      } else {
-        setSchedule(
-          Array.from({ length: 7 }, (_, i) => ({
-            day_of_week: i,
-            open_time: "09:00",
-            close_time: "17:00",
-            is_day_off: i === 0,
-          }))
-        );
-      }
-      setMsg("");
-    } catch (err) {
-      console.error("❌ Błąd ładowania harmonogramu:", err);
-      setMsg("❌ Błąd ładowania harmonogramu");
-    }
-  };
+    // --- Pobierz harmonogram pracownika ---
+    const loadSchedule = async (employeeId) => {
+        if (!employeeId) return;
+        try {
+            const token = await firebaseUser.getIdToken();
+            const res = await axios.get(
+                `${backendBase}/api/schedule/employee/${employeeId}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
 
-  // 🔹 Zapis harmonogramu
-  const saveSchedule = async () => {
-    if (!selectedEmployee) {
-      setMsg("⚠️ Wybierz pracownika przed zapisem!");
-      return;
-    }
-    try {
-      const token = await firebaseUser.getIdToken();
-      await axios.post(
-        `${backendBase}/api/schedule/employee/${selectedEmployee}`,
-        { schedule },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setMsg("✅ Harmonogram zapisany");
-    } catch {
-      setMsg("❌ Błąd zapisu harmonogramu");
-    }
-  };
+            if (Array.isArray(res.data) && res.data.length > 0) {
+                const normalized = res.data
+                    .sort((a, b) => a.day_of_week - b.day_of_week)
+                    .map((row) => ({
+                        day_of_week: row.day_of_week,
+                        open_time: normalizeTime(row.open_time),
+                        close_time: normalizeTime(row.close_time),
+                        is_day_off: !!row.is_day_off,
+                    }));
+                setSchedule(normalized);
+            } else {
+                // domyślny grafik: niedziela wolna, reszta 09-17
+                const defaults = Array.from({ length: 7 }, (_, i) => ({
+                    day_of_week: i,
+                    open_time: "09:00",
+                    close_time: "17:00",
+                    is_day_off: i === 0,
+                }));
+                setSchedule(defaults);
+            }
+            setMsg("");
+        } catch (err) {
+            console.error("❌ Błąd ładowania harmonogramu:", err);
+            setMsg("❌ Błąd ładowania harmonogramu");
+        }
+    };
 
-  // 🔹 Dodawanie dnia wolnego (święta)
-  const addHoliday = async (date, reason) => {
-    try {
-      const formattedDate = fmtDate(date); // tylko YYYY-MM-DD
-      const token = await firebaseUser.getIdToken();
-      await axios.post(
-        `${backendBase}/api/schedule/holidays`,
-        { date: formattedDate, reason },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setMsg("✅ Dzień wolny dodany");
+    useEffect(() => {
+        if (firebaseUser) loadSalons();
+    }, [firebaseUser]);
 
-      const hol = await axios.get(`${backendBase}/api/schedule/holidays`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setHolidays(hol.data);
-    } catch (err) {
-      console.error("❌ Błąd przy dodawaniu dnia wolnego:", err);
-      setMsg("❌ Błąd przy dodawaniu dnia wolnego");
-    }
-  };
+    useEffect(() => {
+        if (selectedSalon) {
+            setSelectedEmployee(null);
+            setShowScheduleForm(false);
+            setSchedule([]);
+            loadEmployees(selectedSalon.id);
+        } else {
+            setEmployees([]);
+        }
+    }, [selectedSalon]);
 
-  // 🔹 Dodawanie urlopu
-  const addVacation = async (employee_id, start_date, end_date, reason) => {
-    try {
-      const token = await firebaseUser.getIdToken();
-      const formattedStart = fmtDate(start_date);
-      const formattedEnd = fmtDate(end_date);
+    // --- Zapis harmonogramu ---
+    const saveSchedule = async () => {
+        if (!selectedEmployee) {
+            setMsg("⚠️ Wybierz pracownika przed zapisem!");
+            return;
+        }
+        try {
+            setLoading(true);
+            const token = await firebaseUser.getIdToken();
+            await axios.post(
+                `${backendBase}/api/schedule/employee/${selectedEmployee.id}`,
+                { schedule },
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            setMsg("✅ Harmonogram zapisany");
+        } catch (err) {
+            console.error("❌ Błąd zapisu harmonogramu:", err);
+            setMsg("❌ Błąd zapisu harmonogramu");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-      await axios.post(
-        `${backendBase}/api/schedule/vacations`,
-        {
-          employee_id,
-          start_date: formattedStart,
-          end_date: formattedEnd,
-          reason,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+    return (
+        <div className="w-full min-h-screen pb-24 bg-[#f7f7f7] dark:bg-[#0d0d0d]">
+            {/* HEADER */}
+            <div className="bg-[#e57b2c] pt-[calc(env(safe-area-inset-top)+14px)] pb-10 px-6">
+                <h1 className="text-white text-[26px] font-semibold flex items-center gap-2">
+                    <Clock3 size={24} />
+                    Godziny pracy
+                </h1>
+                <p className="text-white/80 text-[13px] mt-1">
+                    Zarządzaj harmonogramem pracy pracowników w swoich salonach.
+                </p>
+            </div>
 
-      setMsg("✅ Urlop dodany");
-      const vac = await axios.get(`${backendBase}/api/schedule/vacations`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setVacations(vac.data);
-    } catch (err) {
-      console.error("❌ Błąd przy dodawaniu urlopu:", err);
-      setMsg("❌ Błąd przy dodawaniu urlopu");
-    }
-  };
+            <div className="-mt-6">
+                <div className="bg-white dark:bg-[#1a1a1a] rounded-t-[32px] px-6 py-6 shadow-sm max-w-3xl mx-auto">
+                    {/* LISTA SALONÓW */}
+                    <h2 className="text-[18px] font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                        Wybierz salon:
+                    </h2>
 
-  return (
-    <div style={{ maxWidth: 800 }}>
-      <h2>🕒 Harmonogram pracy</h2>
+                    <div className="space-y-3 mb-6">
+                        {salons.length === 0 && (
+                            <div className="text-[14px] text-gray-500 dark:text-gray-400">
+                                Nie masz żadnych salonów.
+                            </div>
+                        )}
 
-      <div style={{ marginBottom: 20 }}>
-        <button onClick={() => setTab("hours")}>Godziny pracy</button>{" "}
-        <button onClick={() => setTab("holidays")}>Święta / dni wolne</button>{" "}
-        <button onClick={() => setTab("vacations")}>Urlopy pracowników</button>
-      </div>
+                        {salons.map((s, i) => (
+                            <motion.div
+                                key={s.id}
+                                initial={{ opacity: 0, y: 8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: i * 0.04 }}
+                                onClick={() => {
+                                    setSelectedSalon(s);
+                                }}
+                                className={`cursor-pointer bg-white dark:bg-[#2a2a2a] border rounded-3xl px-5 py-4 flex items-center gap-4 transition 
+                                    ${selectedSalon?.id === s.id
+                                        ? "border-[#e57b2c]"
+                                        : "border-gray-200 dark:border-gray-700"
+                                    }
+                                    hover:shadow-md`}
+                            >
+                                {s.image_url && (
+                                    <img
+                                        src={`${backendBase}/uploads/${s.image_url}`}
+                                        alt={s.name}
+                                        className="w-14 h-14 rounded-2xl object-cover"
+                                        onError={(e) => {
+                                            e.target.style.display = "none";
+                                        }}
+                                    />
+                                )}
+                                <div className="flex-1">
+                                    <div className="text-[15px] font-semibold text-gray-900 dark:text-gray-100">
+                                        {s.name}
+                                    </div>
+                                    <div className="text-[13px] text-gray-500 dark:text-gray-400 mt-1">
+                                        {s.city}, {s.street} {s.street_number}
+                                    </div>
+                                </div>
+                            </motion.div>
+                        ))}
+                    </div>
 
-      {/* --- GODZINY PRACY --- */}
-      {tab === "hours" && (
-        <div>
-          <h3>👥 Wybierz pracownika:</h3>
-          <select
-            value={selectedEmployee}
-            onChange={(e) => {
-              setSelectedEmployee(e.target.value);
-              loadSchedule(e.target.value);
-            }}
-            style={{ marginBottom: 15 }}
-          >
-            <option value="">-- Wybierz pracownika --</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name}
-              </option>
-            ))}
-          </select>
+                    {/* LISTA PRACOWNIKÓW SALONU */}
+                    {selectedSalon && (
+                        <div className="mt-2">
+                            <h3 className="text-[16px] font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                                Pracownicy w salonie {selectedSalon.name}
+                            </h3>
 
-          {selectedEmployee && (
-            <>
-              <table
-                border="1"
-                cellPadding="6"
-                style={{ width: "100%", borderCollapse: "collapse" }}
-              >
-                <thead>
-                  <tr>
-                    <th>Dzień</th>
-                    <th>Otwarcie</th>
-                    <th>Zamknięcie</th>
-                    <th>Wolne</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {schedule.map((d, idx) => (
-                    <tr key={idx}>
-                      <td>{days[d.day_of_week]}</td>
-                      <td>
-                        <input
-                          type="time"
-                          value={d.open_time}
-                          onChange={(e) =>
-                            setSchedule((prev) =>
-                              prev.map((x, i) =>
-                                i === idx ? { ...x, open_time: e.target.value } : x
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="time"
-                          value={d.close_time}
-                          onChange={(e) =>
-                            setSchedule((prev) =>
-                              prev.map((x, i) =>
-                                i === idx ? { ...x, close_time: e.target.value } : x
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={d.is_day_off}
-                          onChange={(e) =>
-                            setSchedule((prev) =>
-                              prev.map((x, i) =>
-                                i === idx ? { ...x, is_day_off: e.target.checked } : x
-                              )
-                            )
-                          }
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            <div className="space-y-3 mb-5">
+                                {employees.length === 0 && (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                        Brak pracowników w tym salonie.
+                                    </p>
+                                )}
 
-              <button style={{ marginTop: 10 }} onClick={saveSchedule}>
-                💾 Zapisz harmonogram
-              </button>
-            </>
-          )}
+                                {employees.map((emp, i) => (
+                                    <motion.div
+                                        key={emp.id}
+                                        initial={{ opacity: 0, y: 8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: i * 0.03 }}
+                                        onClick={async () => {
+                                            setSelectedEmployee(emp);
+                                            setShowScheduleForm(true);
+                                            await loadSchedule(emp.id);
+                                        }}
+                                        className={`cursor-pointer bg-white dark:bg-[#2a2a2a] border rounded-3xl px-5 py-3 flex items-center gap-4 transition 
+                                            ${selectedEmployee?.id === emp.id
+                                                ? "border-[#e57b2c]"
+                                                : "border-gray-200 dark:border-gray-700"
+                                            }
+                                            hover:shadow-md`}
+                                    >
+                                        {emp.image_url ? (
+                                            <img
+                                                src={`${backendBase}/${emp.image_url}`}
+                                                alt={emp.name}
+                                                className="w-12 h-12 rounded-2xl object-cover"
+                                                onError={(e) => {
+                                                    e.target.style.display = "none";
+                                                }}
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-2xl flex items-center justify-center text-gray-500 text-xs">
+                                                brak
+                                            </div>
+                                        )}
+                                        <div className="flex-1">
+                                            <div className="text-[14px] font-semibold text-gray-900 dark:text-gray-100">
+                                                {emp.name}
+                                            </div>
+                                            {emp.description && (
+                                                <div className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5">
+                                                    {emp.description}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* PRZYCISK: EDYTUJ GODZINY PRACY */}
+                    {selectedSalon && selectedEmployee && (
+                        <div className="flex gap-3 mb-5">
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (!schedule.length) {
+                                        await loadSchedule(selectedEmployee.id);
+                                    }
+                                    setShowScheduleForm(true);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-2 bg-[#e57b2c] text-white rounded-2xl py-2.5 text-[14px] font-medium"
+                            >
+                                <Edit3 size={18} />
+                                Edytuj godziny pracy – {selectedEmployee.name}
+                            </button>
+                        </div>
+                    )}
+
+                    {/* FORMULARZ GODZIN PRACY */}
+                    {selectedSalon && selectedEmployee && showScheduleForm && (
+                        <div className="bg-white dark:bg-[#2a2a2a] border border-gray-200 dark:border-gray-700 rounded-3xl p-5 mb-6 space-y-4">
+                            <div className="flex justify-between items-center mb-2">
+                                <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-900 dark:text-gray-100">
+                                    <Clock3 size={18} />
+                                    Godziny pracy – {selectedEmployee.name}
+                                </h2>
+                            </div>
+
+                            <div className="space-y-3">
+                                {schedule.map((d, idx) => (
+                                    <div
+                                        key={idx}
+                                        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white dark:bg-[#1f1f1f] border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3"
+                                    >
+                                        <div className="w-full sm:w-1/3">
+                                            <p className="text-[14px] font-medium text-gray-900 dark:text-gray-100">
+                                                {days[d.day_of_week]}
+                                            </p>
+                                        </div>
+
+                                        <div className="flex-1 flex flex-wrap items-center gap-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[12px] text-gray-500 dark:text-gray-400">
+                                                    od
+                                                </span>
+                                                <input
+                                                    type="time"
+                                                    value={d.open_time}
+                                                    onChange={(e) =>
+                                                        setSchedule((prev) =>
+                                                            prev.map((x, i) =>
+                                                                i === idx
+                                                                    ? { ...x, open_time: e.target.value }
+                                                                    : x
+                                                            )
+                                                        )
+                                                    }
+                                                    className="p-2 rounded-xl bg-white dark:bg-[#0f0f0f] border border-gray-300 dark:border-gray-700 text-sm"
+                                                    disabled={d.is_day_off}
+                                                />
+                                            </div>
+
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[12px] text-gray-500 dark:text-gray-400">
+                                                    do
+                                                </span>
+                                                <input
+                                                    type="time"
+                                                    value={d.close_time}
+                                                    onChange={(e) =>
+                                                        setSchedule((prev) =>
+                                                            prev.map((x, i) =>
+                                                                i === idx
+                                                                    ? { ...x, close_time: e.target.value }
+                                                                    : x
+                                                            )
+                                                        )
+                                                    }
+                                                    className="p-2 rounded-xl bg-white dark:bg-[#0f0f0f] border border-gray-300 dark:border-gray-700 text-sm"
+                                                    disabled={d.is_day_off}
+                                                />
+                                            </div>
+
+                                            <label className="flex items-center gap-2 ml-auto text-[13px] text-gray-700 dark:text-gray-200">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={d.is_day_off}
+                                                    onChange={(e) =>
+                                                        setSchedule((prev) =>
+                                                            prev.map((x, i) =>
+                                                                i === idx
+                                                                    ? { ...x, is_day_off: e.target.checked }
+                                                                    : x
+                                                            )
+                                                        )
+                                                    }
+                                                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600"
+                                                />
+                                                Dzień wolny
+                                            </label>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button
+                                type="button"
+                                disabled={loading}
+                                onClick={saveSchedule}
+                                className="w-full bg-[#e57b2c] text-white rounded-2xl py-3 text-[15px] font-medium disabled:opacity-60"
+                            >
+                                {loading ? "Zapisywanie..." : "💾 Zapisz harmonogram"}
+                            </button>
+                        </div>
+                    )}
+
+                    {msg && (
+                        <p
+                            className={`mt-4 text-sm font-medium ${msg.startsWith("✅")
+                                ? "text-green-500"
+                                : "text-red-500"
+                                }`}
+                        >
+                            {msg}
+                        </p>
+                    )}
+                </div>
+            </div>
         </div>
-      )}
-
-      {/* --- ŚWIĘTA --- */}
-      {tab === "holidays" && (
-        <div>
-          <h3>🎉 Święta i dni wolne</h3>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              addHoliday(e.target.date.value, e.target.reason.value);
-              e.target.reset();
-            }}
-          >
-            <input type="date" name="date" required />
-            <input placeholder="Powód" name="reason" />
-            <button type="submit">➕ Dodaj</button>
-          </form>
-          <ul>
-            {holidays.map((h) => (
-              <li key={h.id}>
-                📅 {prettyDate(h.date)} — {h.reason || "brak powodu"}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* --- URLOPY --- */}
-      {tab === "vacations" && (
-        <div>
-          <h3>🏖️ Urlopy pracowników</h3>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              addVacation(
-                e.target.employee.value,
-                e.target.start.value,
-                e.target.end.value,
-                e.target.reason.value
-              );
-              e.target.reset();
-            }}
-          >
-            <select name="employee" required>
-              <option value="">Wybierz pracownika</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </select>
-            <input type="date" name="start" required />
-            <input type="date" name="end" required />
-            <input placeholder="Powód" name="reason" />
-            <button type="submit">➕ Dodaj urlop</button>
-          </form>
-
-          <ul>
-            {vacations.map((v) => (
-              <li key={v.id}>
-                🧍‍♂️ {v.employee_name} — {prettyDate(v.start_date)} →{" "}
-                {prettyDate(v.end_date)} ({v.reason})
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <p style={{ marginTop: 15 }}>{msg}</p>
-    </div>
-  );
+    );
 }
