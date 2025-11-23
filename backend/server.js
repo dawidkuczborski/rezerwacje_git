@@ -6080,10 +6080,9 @@ app.post(
                 console.error("⚠️ Nie udało się wysłać eventu calendar_updated (NEW):", err);
             }
 
-
             /* ------------------------------------------------------
-   🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
------------------------------------------------------- */
+               🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
+            ------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
@@ -6095,53 +6094,49 @@ app.post(
 
                 console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
-                if (subs.rows.length > 0) {
-                    const payload = {
-                        title: "Nowa rezerwacja",
-                        body: `Nowa wizyta: ${date} o ${start_time}`,
-                        url: "/employee/calendar"
-                    };
+                if (subs.rows.length === 0) {
+                    console.log("ℹ️ Brak subskrypcji push dla pracownika.");
+                }
 
-                    for (const row of subs.rows) {
-                        try {
-                            console.log("🔔 [PUSH] Raw subscription:", row.subscription);
+                for (const row of subs.rows) {
+                    try {
+                        console.log("🔔 [PUSH] Raw subscription:", row.subscription);
 
-                            const parsed = JSON.parse(row.subscription);
-                            console.log("🔔 [PUSH] Parsed subscription:", parsed);
+                        const parsed = JSON.parse(row.subscription);
+                        console.log("🔔 [PUSH] Parsed subscription:", parsed);
 
-                            const payloadString = JSON.stringify({
-                                title: String(payload.title || ""),
-                                body: String(payload.body || ""),
-                                url: String(payload.url || "/")
-                            });
+                        // ⚠️ Safari i FCM akceptują TYLKO string – nic innego
+                        const payloadString = JSON.stringify({
+                            title: `${"Nowa rezerwacja"}`,
+                            body: `${"Nowa wizyta: " + date + " o " + start_time}`,
+                            url: "/employee/calendar"
+                        });
 
-                            console.log("👉 PAYLOAD STRING:", payloadString);
+                        console.log("👉 PAYLOAD STRING:", payloadString);
 
-                            await webpush.sendNotification(
-                                parsed,
-                                payloadString
+                        // ✔️ JEDYNE poprawne wywołanie sendNotification
+                        await webpush.sendNotification(parsed, payloadString);
+
+                        console.log("✔️ [PUSH] Wysłano poprawnie");
+
+                    } catch (err) {
+                        console.error("❌ [PUSH ERROR] msg:", err.message);
+                        console.error("❌ status:", err.statusCode);
+
+                        // usuń martwe subskrypcje
+                        if (err.statusCode === 410 || err.statusCode === 404) {
+                            console.log("🗑 Usuwam martwą subskrypcję");
+                            await pool.query(
+                                "DELETE FROM push_subscriptions WHERE subscription = $1",
+                                [row.subscription]
                             );
-
-
-                            console.log("✔️ [PUSH] Wysłano poprawnie");
-                        } catch (err) {
-                            console.error("❌ [PUSH ERROR] msg:", err.message);
-                            console.error("❌ status:", err.statusCode);
-
-                            // usuń martwe subskrypcje
-                            if (err.statusCode === 410 || err.statusCode === 404) {
-                                console.log("🗑 Usuwam martwą subskrypcję");
-                                await pool.query(
-                                    "DELETE FROM push_subscriptions WHERE subscription = $1",
-                                    [row.subscription]
-                                );
-                            }
                         }
                     }
                 }
             } catch (err) {
                 console.error("❌ GLOBAL PUSH ERROR:", err);
             }
+
 
             res.json({
                 message: "✅ Rezerwacja utworzona",
