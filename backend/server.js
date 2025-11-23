@@ -6109,10 +6109,19 @@ app.post(
                             const parsed = JSON.parse(row.subscription);
                             console.log("🔔 [PUSH] Parsed subscription:", parsed);
 
+                            const payloadString = JSON.stringify({
+                                title: String(payload.title || ""),
+                                body: String(payload.body || ""),
+                                url: String(payload.url || "/")
+                            });
+
+                            console.log("👉 PAYLOAD STRING:", payloadString);
+
                             await webpush.sendNotification(
                                 parsed,
-                                JSON.stringify(payload)
+                                payloadString
                             );
+
 
                             console.log("✔️ [PUSH] Wysłano poprawnie");
                         } catch (err) {
