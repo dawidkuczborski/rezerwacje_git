@@ -764,9 +764,11 @@ app.post(
         for (const row of rows.rows) {
             try {
                 await webpush.sendNotification(
-                    row.subscription,
+                    JSON.parse(row.subscription),
                     JSON.stringify({ title, body, url })
                 );
+
+
             } catch (err) {
                 console.log("❌ Push send error:", err.message);
             }
@@ -2955,9 +2957,11 @@ app.post(
                     for (const row of subs.rows) {
                         try {
                             await webpush.sendNotification(
-                                row.subscription,              // to już jest OBIEKT
-                                JSON.stringify(payload)        // body push-a
+                                JSON.parse(row.subscription),
+                                JSON.stringify(payload)
                             );
+
+
                         } catch (err) {
                             console.log("❌ Push send error:", err.message);
                         }
