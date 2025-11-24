@@ -722,17 +722,20 @@ app.post(
         const uid = req.user?.uid;
 
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+        if (!subscription?.endpoint)
+            return res.status(400).json({ error: "Brak endpointu subskrypcji" });
 
         await pool.query(
-            `INSERT INTO push_subscriptions (uid, subscription)
-             VALUES ($1, $2)
-             ON CONFLICT DO NOTHING`,
-            [uid, subscription]
+            `INSERT INTO push_subscriptions (uid, subscription, endpoint)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (endpoint) DO NOTHING`,
+            [uid, subscription, subscription.endpoint]
         );
 
         res.json({ success: true });
     })
 );
+
 
 
 app.post(
