@@ -1031,10 +1031,8 @@ app.put(
                 try {
                     console.log("🔔 [PUSH CANCEL] Generuję push przy anulowaniu…");
 
-                    // helper do formatowania 14:00:00 → 14:00
                     const formatTime = (t) => String(t).slice(0, 5);
 
-                    // pełne dane wizyty
                     const details = await pool.query(`
             SELECT a.*, u.name AS client_name, s.name AS service_name
             FROM appointments a
@@ -1045,7 +1043,6 @@ app.put(
 
                     const ap = details.rows[0];
 
-                    // ➕ dodatki
                     const addonsRes = await pool.query(`
             SELECT sa.name 
             FROM appointment_addons aa
@@ -1062,7 +1059,6 @@ app.put(
                         year: "numeric",
                     });
 
-                    // 🧑‍🔧 pracownik (uid + nazwa)
                     const empRes = await pool.query(
                         `SELECT uid, name FROM employees WHERE id=$1`,
                         [ap.employee_id]
@@ -1070,17 +1066,14 @@ app.put(
                     const employeeUid = empRes.rows[0]?.uid;
                     const employeeName = empRes.rows[0]?.name || "Pracownik";
 
-                    // 👑 provider
                     const ownerRes = await pool.query(
                         `SELECT owner_uid FROM salons WHERE id=$1`,
                         [ap.salon_id]
                     );
                     const providerUid = ownerRes.rows[0]?.owner_uid;
 
-                    // odbiorcy PUSH
                     const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
-                    // pobierz subskrypcje
                     const subs = await pool.query(
                         `SELECT uid, subscription 
              FROM push_subscriptions
@@ -1088,18 +1081,17 @@ app.put(
                         [uidsToNotify]
                     );
 
-                    // wysyłanie
                     for (const row of subs.rows) {
                         const targetUid = row.uid;
 
-                        // ⭐ PRACOWNIK — normalne powiadomienie
+                        // ⭐ PRACOWNIK
                         if (targetUid === employeeUid) {
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
                                 body:
                                     `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
                                     `${ap.service_name}${addonsText}`,
-                                url: `/employee/appointment/${ap.id}`
+                                url: `/notification/appointment/${ap.id}`  // 🔥 NOWY MODAL
                             });
 
                             try {
@@ -1109,7 +1101,7 @@ app.put(
                             }
                         }
 
-                        // ⭐ PROVIDER — powiadomienie z dopiskiem o pracowniku
+                        // ⭐ PROVIDER
                         if (targetUid === providerUid) {
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
@@ -1117,7 +1109,7 @@ app.put(
                                     `Pracownik: ${employeeName}\n` +
                                     `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
                                     `${ap.service_name}${addonsText}`,
-                                url: `/employee/appointment/${ap.id}`
+                                url: `/notification/appointment/${ap.id}`  // 🔥 NOWY MODAL
                             });
 
                             try {
@@ -1134,6 +1126,7 @@ app.put(
                     console.error("❌ PUSH CANCEL GLOBAL ERROR:", err);
                 }
             }
+
 
 
 
@@ -1245,20 +1238,16 @@ app.put(
    🔔 PUSH — zmiana terminu wizyty (pracownik + provider)
 ------------------------------------------------------ */
             try {
-                // helper do formatowania 14:00:00 → 14:00
                 const formatTime = (t) => String(t).slice(0, 5);
 
-                // pobierz aktualne dane po UPDATE
                 const updated = updateRes.rows[0];
 
-                // 🧍 klient
                 const userRes = await pool.query(
                     `SELECT name FROM users WHERE uid = $1`,
                     [appt.client_uid]
                 );
                 const clientFullName = userRes.rows[0]?.name || "";
 
-                // 📅 daty
                 const prevDate = new Date(appt.date).toLocaleDateString("pl-PL", {
                     day: "numeric",
                     month: "long",
@@ -1271,14 +1260,12 @@ app.put(
                     year: "numeric",
                 });
 
-                // 🔧 usługa
                 const svc = await pool.query(
                     `SELECT name FROM services WHERE id = $1`,
                     [appt.service_id]
                 );
                 const serviceName = svc.rows[0]?.name || "";
 
-                // ➕ dodatki
                 const addonsRes = await pool.query(
                     `SELECT sa.name 
          FROM appointment_addons aa
@@ -1290,7 +1277,6 @@ app.put(
                 const addonNames = addonsRes.rows.map(a => a.name);
                 const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
-                // 🧑‍🔧 pracownik (uid + nazwa)
                 const empRes = await pool.query(
                     `SELECT uid, name FROM employees WHERE id = $1`,
                     [appt.employee_id]
@@ -1298,17 +1284,14 @@ app.put(
                 const employeeUid = empRes.rows[0]?.uid;
                 const employeeName = empRes.rows[0]?.name || "Pracownik";
 
-                // 👑 provider
                 const ownerRes = await pool.query(
                     `SELECT owner_uid FROM salons WHERE id=$1`,
                     [appt.salon_id]
                 );
                 const providerUid = ownerRes.rows[0]?.owner_uid;
 
-                // odbiorcy
                 const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
-                // pobierz subskrypcje po UID
                 const subs = await pool.query(
                     `SELECT uid, subscription 
          FROM push_subscriptions
@@ -1316,18 +1299,17 @@ app.put(
                     [uidsToNotify]
                 );
 
-                // 🔔 wysyłanie powiadomień
                 for (const row of subs.rows) {
                     const targetUid = row.uid;
 
-                    // ⭐ pracownik → bez informacji o pracowniku
+                    // ⭐ PRACOWNIK
                     if (targetUid === employeeUid) {
                         const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
                             body:
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
                                 `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/employee/appointment/${updated.id}`
+                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
                         });
 
                         try {
@@ -1337,7 +1319,7 @@ app.put(
                         }
                     }
 
-                    // ⭐ provider → Z INFORMACJĄ O PRACOWNIKU
+                    // ⭐ PROVIDER
                     if (targetUid === providerUid) {
                         const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
@@ -1345,7 +1327,7 @@ app.put(
                                 `Pracownik: ${employeeName}\n` +
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
                                 `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/employee/appointment/${updated.id}`
+                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
                         });
 
                         try {
@@ -1359,6 +1341,7 @@ app.put(
             } catch (err) {
                 console.error("❌ PUSH UPDATE GLOBAL ERROR:", err);
             }
+
 
 
 
