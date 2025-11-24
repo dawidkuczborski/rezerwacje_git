@@ -13,6 +13,7 @@ import BottomNavEmployee from "./components/BottomNavEmployee";
 import ScrollToTop from "./components/ScrollToTop";
 import NotificationModalRouteWrapper from "./components/NotificationModalRouteWrapper";
 // import NotificationAppointmentModal from "./components/NotificationAppointmentModal"; // 👈 już niepotrzebne
+import NotificationAppointmentPage from "./pages/NotificationAppointmentPage";
 
 // NOWE: jedna strona logowania
 import Login from "./pages/Login";
@@ -368,6 +369,17 @@ function AppRoutes() {
                     )
                 }
             />
+            <Route
+                path="/notification/appointment/:id"
+                element={
+                    isLoggedIn ? (
+                        <NotificationAppointmentPage />
+                    ) : (
+                        <Navigate to="/login" replace />
+                    )
+                }
+            />
+
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
