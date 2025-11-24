@@ -817,6 +817,52 @@ app.post(
         res.json({ success: true, sent: rows.rows.length });
     })
 );
+app.get(
+    "/notifications",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+
+        if (!uid) {
+            return res.status(401).json({ error: "Brak autoryzacji" });
+        }
+
+        const result = await pool.query(
+            `SELECT *
+             FROM notifications
+             WHERE uid = $1 AND is_read = FALSE
+             ORDER BY created_at DESC`,
+            [uid]
+        );
+
+        res.json(result.rows);
+    })
+);
+app.post(
+    "/notifications/mark-read",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const { id } = req.body;
+        const uid = req.user?.uid;
+
+        if (!uid) {
+            return res.status(401).json({ error: "Brak autoryzacji" });
+        }
+
+        if (!id) {
+            return res.status(400).json({ error: "Brak ID powiadomienia" });
+        }
+
+        await pool.query(
+            `UPDATE notifications
+             SET is_read = TRUE
+             WHERE id = $1 AND uid = $2`,
+            [id, uid]
+        );
+
+        res.json({ success: true });
+    })
+);
 
 
 
@@ -1026,7 +1072,7 @@ app.put(
             }
 
 
-            // 🔥 POWIADOMIENIE PUSH – anulowanie wizyty
+            // 🔥 POWIADOMIENIE PUSH + ZAPIS W BAZIE – anulowanie wizyty
             if (status === "cancelled") {
                 try {
                     console.log("🔔 [PUSH CANCEL] Generuję push przy anulowaniu…");
@@ -1074,6 +1120,44 @@ app.put(
 
                     const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
+                    // 📌 przygotowanie tekstów
+                    const textEmployee =
+                        `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
+                        `${ap.service_name}${addonsText}`;
+
+                    const textProvider =
+                        `Pracownik: ${employeeName}\n` +
+                        `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
+                        `${ap.service_name}${addonsText}`;
+
+                    // 🔥 TU: ZAPISUJEMY POWIADOMIENIA DO BAZY
+                    if (employeeUid) {
+                        await pool.query(
+                            `INSERT INTO notifications (uid, title, body, url)
+                 VALUES ($1, $2, $3, $4)`,
+                            [
+                                employeeUid,
+                                `Anulowano wizytę — ${ap.client_name}`,
+                                textEmployee,
+                                `/notification/appointment/${ap.id}`
+                            ]
+                        );
+                    }
+
+                    if (providerUid) {
+                        await pool.query(
+                            `INSERT INTO notifications (uid, title, body, url)
+                 VALUES ($1, $2, $3, $4)`,
+                            [
+                                providerUid,
+                                `Anulowano wizytę — ${ap.client_name}`,
+                                textProvider,
+                                `/notification/appointment/${ap.id}`
+                            ]
+                        );
+                    }
+
+                    // 🔔 wysyłka PUSH — jak było wcześniej
                     const subs = await pool.query(
                         `SELECT uid, subscription 
              FROM push_subscriptions
@@ -1088,10 +1172,8 @@ app.put(
                         if (targetUid === employeeUid) {
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
-                                body:
-                                    `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
-                                    `${ap.service_name}${addonsText}`,
-                                url: `/notification/appointment/${ap.id}`  // 🔥 NOWY MODAL
+                                body: textEmployee,
+                                url: `/notification/appointment/${ap.id}`
                             });
 
                             try {
@@ -1105,11 +1187,8 @@ app.put(
                         if (targetUid === providerUid) {
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
-                                body:
-                                    `Pracownik: ${employeeName}\n` +
-                                    `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
-                                    `${ap.service_name}${addonsText}`,
-                                url: `/notification/appointment/${ap.id}`  // 🔥 NOWY MODAL
+                                body: textProvider,
+                                url: `/notification/appointment/${ap.id}`
                             });
 
                             try {
@@ -1120,12 +1199,13 @@ app.put(
                         }
                     }
 
-                    console.log("✔️ PUSH CANCEL wysłany");
+                    console.log("✔️ PUSH CANCEL + zapis powiadomień wykonany");
 
                 } catch (err) {
                     console.error("❌ PUSH CANCEL GLOBAL ERROR:", err);
                 }
             }
+
 
 
 
@@ -1235,8 +1315,8 @@ app.put(
 
 
             /* ------------------------------------------------------
-   🔔 PUSH — zmiana terminu wizyty (pracownik + provider)
------------------------------------------------------- */
+    🔔 PUSH + NOTYFIKACJA — zmiana terminu wizyty (pracownik + provider)
+ ------------------------------------------------------ */
             try {
                 const formatTime = (t) => String(t).slice(0, 5);
 
@@ -1292,6 +1372,44 @@ app.put(
 
                 const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
+                // 📌 GOTOWE TEKSTY DO POWIADOMIEŃ
+                const textEmployee =
+                    `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
+                    `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`;
+
+                const textProvider =
+                    `Pracownik: ${employeeName}\n` +
+                    `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
+                    `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`;
+
+                // 🔥 TU ZAPISUJEMY POWIADOMIENIA DO BAZY
+                if (employeeUid) {
+                    await pool.query(
+                        `INSERT INTO notifications (uid, title, body, url)
+             VALUES ($1, $2, $3, $4)`,
+                        [
+                            employeeUid,
+                            `Nowy termin — ${clientFullName}`,
+                            textEmployee,
+                            `/notification/appointment/${updated.id}`
+                        ]
+                    );
+                }
+
+                if (providerUid) {
+                    await pool.query(
+                        `INSERT INTO notifications (uid, title, body, url)
+             VALUES ($1, $2, $3, $4)`,
+                        [
+                            providerUid,
+                            `Nowy termin — ${clientFullName}`,
+                            textProvider,
+                            `/notification/appointment/${updated.id}`
+                        ]
+                    );
+                }
+
+                // 🔔 A TERAZ WEB PUSH — PO STAREMU
                 const subs = await pool.query(
                     `SELECT uid, subscription 
          FROM push_subscriptions
@@ -1302,14 +1420,12 @@ app.put(
                 for (const row of subs.rows) {
                     const targetUid = row.uid;
 
-                    // ⭐ PRACOWNIK
+                    // ⭐ employee
                     if (targetUid === employeeUid) {
                         const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
-                            body:
-                                `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
-                                `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
+                            body: textEmployee,
+                            url: `/notification/appointment/${updated.id}`
                         });
 
                         try {
@@ -1319,15 +1435,12 @@ app.put(
                         }
                     }
 
-                    // ⭐ PROVIDER
+                    // ⭐ provider
                     if (targetUid === providerUid) {
                         const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
-                            body:
-                                `Pracownik: ${employeeName}\n` +
-                                `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
-                                `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
+                            body: textProvider,
+                            url: `/notification/appointment/${updated.id}`
                         });
 
                         try {
@@ -1341,6 +1454,7 @@ app.put(
             } catch (err) {
                 console.error("❌ PUSH UPDATE GLOBAL ERROR:", err);
             }
+
 
 
 
@@ -6358,7 +6472,7 @@ app.post(
 
 
             /* ------------------------------------------------------
-   🔔 WEB PUSH – powiadom pracownika i providera o nowej wizycie
+   🔔 WEB PUSH + ZAPIS POWIADOMIENIA – nowa wizyta
 ------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
@@ -6388,8 +6502,6 @@ app.post(
          WHERE uid = ANY($1::text[])`,
                     [uidsToNotify]
                 );
-
-                console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
                 // ░░░ 4. Nazwa usługi
                 const serviceRow = await pool.query(
@@ -6423,17 +6535,50 @@ app.post(
                 // ░░░ 7. Imię + nazwisko klienta
                 const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
 
-                // ░░░ 8. Wysyłanie powiadomień ░░░
+                // -------------------------------------------
+                // 🔥 8. ZAPIS POWIADOMIEŃ DO BAZY (NOWE!)
+                // -------------------------------------------
+
+                // powiadomienie pracownika
+                if (employeeUid) {
+                    await pool.query(
+                        `INSERT INTO notifications (uid, title, body, url)
+             VALUES ($1, $2, $3, $4)`,
+                        [
+                            employeeUid,
+                            `Nowa wizyta – ${clientFullName}`,
+                            `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
+                            `/notification/appointment/${appointmentId}`
+                        ]
+                    );
+                }
+
+                // powiadomienie providera
+                if (providerUid) {
+                    await pool.query(
+                        `INSERT INTO notifications (uid, title, body, url)
+             VALUES ($1, $2, $3, $4)`,
+                        [
+                            providerUid,
+                            `Nowa wizyta – ${clientFullName}`,
+                            `Pracownik: ${employeeName}\n${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
+                            `/notification/appointment/${appointmentId}`
+                        ]
+                    );
+                }
+
+
+                // -------------------------------------------
+                // 🔔 9. Wysyłka push (bez zmian)
+                // -------------------------------------------
                 for (const row of subs.rows) {
                     const targetUid = row.uid;
 
-                    // ⭐ Wersja dla pracownika
+                    // ⭐ Worker
                     if (targetUid === employeeUid) {
                         const payload = JSON.stringify({
                             title: `Nowa wizyta – ${clientFullName}`,
                             body: `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
-
-                            // 🔥 NOWY LINK DO NOWEGO MODALA
                             url: `/notification/appointment/${appointmentId}`,
                         });
 
@@ -6444,7 +6589,7 @@ app.post(
                         }
                     }
 
-                    // ⭐ Wersja dla providera
+                    // ⭐ Provider
                     if (targetUid === providerUid) {
                         const payload = JSON.stringify({
                             title: `Nowa wizyta – ${clientFullName}`,
@@ -6452,8 +6597,6 @@ app.post(
                                 `Pracownik: ${employeeName}\n` +
                                 `${formattedDate} • ${start_time}–${end_time}\n` +
                                 `${serviceName}${addonsText}`,
-
-                            // 🔥 TEN SAM LINK
                             url: `/notification/appointment/${appointmentId}`,
                         });
 

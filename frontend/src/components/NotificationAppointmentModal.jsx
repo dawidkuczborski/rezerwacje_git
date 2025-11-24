@@ -13,6 +13,9 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         headers: { Authorization: `Bearer ${localStorage.getItem("authToken")}` }
     });
 
+    // ============================
+    // 🔥 Pobieranie danych wizyty
+    // ============================
     useEffect(() => {
         if (!open || !appointmentId) return;
 
@@ -31,10 +34,29 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         load();
     }, [open, appointmentId]);
 
+    // ==============================================
+    // 🚀 AUTOMATYCZNE OZNACZENIE POWIADOMIENIA PO ZAMKNIĘCIU MODALA
+    // ==============================================
+    useEffect(() => {
+        return () => {
+            if (window._afterNotificationModalClose) {
+                try {
+                    window._afterNotificationModalClose();
+                } catch (e) {
+                    console.error("Notification mark-read error:", e);
+                }
+                window._afterNotificationModalClose = null;
+            }
+        };
+    }, []);
+
     if (!open) return null;
 
+    // ============================
+    // 🔥 Zamknięcie modala
+    // ============================
     const closeToCalendar = () => {
-        navigate("/employee/calendar", { replace: true });
+        navigate(-1); // wróć do poprzedniej strony
     };
 
     const formatDatePL = (d) => {
@@ -45,7 +67,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         }
     };
 
-    // 🟣 ZMIANA TERMINU tylko jeśli status = booked
+    // 🟣 Czy zmieniono termin?
     const isChanged =
         appointment?.status === "booked" &&
         (
@@ -54,7 +76,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
             appointment?.previous_end_time
         );
 
-    // 🟩 STATUSY PL
+    // 🟩 Status PL
     const translateStatus = () => {
         const st = appointment?.status;
 
@@ -64,7 +86,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         return "Zarezerwowana";
     };
 
-    // 🟦 KOLORY STATUSÓW
+    // 🟦 Kolor statusu
     const statusBadge = () => {
         const st = appointment?.status;
 
@@ -92,16 +114,15 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                     initial={{ y: 60 }}
                     animate={{ y: 0 }}
                     exit={{ y: 60 }}
-                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col" // 🔥 usunięte rounded
+                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col"
                 >
-                    {/* HEADER (zostaje zaokrąglony) */}
+                    {/* HEADER */}
                     <div className="bg-[#e57b2c] dark:bg-[#b86422] px-6 pt-[calc(env(safe-area-inset-top)+22px)] pb-8 text-white flex justify-center items-center rounded-t-3xl">
                         <h2 className="text-[20px] font-semibold">Szczegóły wizyty</h2>
                     </div>
 
                     {/* BODY */}
                     <div className="px-6 py-8 space-y-8 flex-1">
-
                         {!appointment ? (
                             <div className="text-center text-gray-400">Ładowanie…</div>
                         ) : (
@@ -174,7 +195,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                                     </div>
                                 </div>
 
-                                {/* HISTORIA ZMIAN — tylko gdy booked i zmieniona */}
+                                {/* HISTORIA ZMIAN */}
                                 {appointment.status === "booked" && isChanged && (
                                     <div className="pt-4">
                                         <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
@@ -182,7 +203,6 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                                         </div>
 
                                         <div className="space-y-2 text-sm">
-
                                             {appointment.previous_date && (
                                                 <div className="flex justify-between">
                                                     <span>Poprzednia data</span>

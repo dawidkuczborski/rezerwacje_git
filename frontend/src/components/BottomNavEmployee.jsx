@@ -12,11 +12,11 @@ import {
     Bell,
 } from "lucide-react";
 
+import { motion } from "framer-motion";
+
 import NewAppointmentModal from "../components/NewAppointmentModal";
 import VacationModal from "../components/VacationModal";
 import TimeOffModal from "../components/TimeOffModal";
-
-import { subscribeToPush } from "../utils/pushNotifications";
 
 export default function BottomNavEmployee() {
     const location = useLocation();
@@ -28,48 +28,105 @@ export default function BottomNavEmployee() {
     const [openVacation, setOpenVacation] = useState(false);
     const [openTimeOff, setOpenTimeOff] = useState(false);
 
-    // 🔔 PUSTA LISTA — będzie wypełniana poprzez WebPush
     const [notifications, setNotifications] = useState([]);
 
-    // 🔥 KROK 3 — odbiór powiadomień z AppLayout (NEW_NOTIFICATION)
-    useEffect(() => {
-        const handler = (e) => {
-            const n = e.detail; // { title, body, url }
+    // ======================================================
+    // 🔥 POBIERANIE POWIADOMIEŃ
+    // ======================================================
+    async function fetchNotifications() {
+        try {
+            const token = localStorage.getItem("authToken");
+            if (!token) return;
 
-            setNotifications((prev) => [
-                {
-                    id: Date.now(),
-                    text: `${n.title}: ${n.body}`,
-                    url: n.url || "/",
+            const res = await fetch(import.meta.env.VITE_API_URL + "/notifications", {
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + token,
                 },
-                ...prev,
-            ]);
-        };
+            });
 
-        window.addEventListener("app-notification", handler);
-        return () => window.removeEventListener("app-notification", handler);
-    }, []);
+            if (!res.ok) return;
+
+            const data = await res.json();
+            if (Array.isArray(data)) setNotifications(data);
+        } catch (err) {
+            console.error("❌ Błąd pobierania powiadomień:", err);
+        }
+    }
+
+    // ======================================================
+    // 🔥 OZNACZ JEDNO POWIADOMIENIE
+    // ======================================================
+    async function markNotificationAsRead(notification, navigateToUrl = true) {
+        try {
+            const token = localStorage.getItem("authToken");
+            if (!token) return;
+
+            await fetch(import.meta.env.VITE_API_URL + "/notifications/mark-read", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + token,
+                },
+                body: JSON.stringify({ id: notification.id }),
+            });
+        } catch (err) {
+            console.error("❌ mark-read:", err);
+        } finally {
+            setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+
+            if (navigateToUrl && notification.url) {
+                window.location.href = notification.url;
+            }
+        }
+    }
+
+    // ======================================================
+    // 🔥 OZNACZ WSZYSTKIE POWIADOMIENIA
+    // ======================================================
+    async function markAllNotifications() {
+        try {
+            const token = localStorage.getItem("authToken");
+            if (!token) return;
+
+            await fetch(import.meta.env.VITE_API_URL + "/notifications/mark-all-read", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + token,
+                },
+            });
+
+            setNotifications([]); // lokalnie usuń
+        } catch (err) {
+            console.error("❌ mark-all-read:", err);
+        }
+    }
+
+    // ======================================================
+    // 🔥 AUTO REFRESH CO 10 SEK
+    // ======================================================
+    useEffect(() => {
+        if (!location.pathname.startsWith("/employee")) return;
+
+        fetchNotifications();
+        const interval = setInterval(fetchNotifications, 10000);
+
+        return () => clearInterval(interval);
+    }, [location.pathname]);
 
     if (!location.pathname.startsWith("/employee")) return null;
 
-    // ❌ usuwanie powiadomienia po przeciągnięciu
-    const handleSwipeDelete = (id) => {
-        setNotifications((prev) => prev.filter((n) => n.id !== id));
-    };
-
     return (
         <>
-            {/* 🔔 DZWONEK NAD MENU */}
+            {/* 🔔 DZWONEK */}
             <div className="fixed bottom-[95px] right-6 z-[9999]">
                 <button
                     className="relative p-3 bg-white dark:bg-neutral-900 rounded-full shadow-lg border"
-                    onClick={async () => {
-                        await subscribeToPush(); // rejestracja push
-                        setOpenNotifications(true);
-                    }}
+                    onClick={() => setOpenNotifications(true)}
                 >
                     <Bell size={26} />
-
                     {notifications.length > 0 && (
                         <span
                             className="
@@ -84,7 +141,7 @@ export default function BottomNavEmployee() {
                 </button>
             </div>
 
-            {/* TŁO PANELU */}
+            {/* TŁO */}
             {openNotifications && (
                 <div
                     className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9998]"
@@ -92,7 +149,7 @@ export default function BottomNavEmployee() {
                 />
             )}
 
-            {/* PANEL POWIADOMIEŃ */}
+            {/* PANEL */}
             {openNotifications && (
                 <div
                     className="
@@ -103,6 +160,16 @@ export default function BottomNavEmployee() {
                 >
                     <div className="flex justify-between items-center mb-4">
                         <h2 className="text-lg font-semibold">Powiadomienia</h2>
+
+                        {notifications.length > 0 && (
+                            <button
+                                onClick={markAllNotifications}
+                                className="text-xs text-red-600 underline mr-3"
+                            >
+                                Usuń wszystkie
+                            </button>
+                        )}
+
                         <button onClick={() => setOpenNotifications(false)}>
                             <X size={22} />
                         </button>
@@ -110,20 +177,26 @@ export default function BottomNavEmployee() {
 
                     <div className="space-y-3 overflow-y-auto pr-1">
                         {notifications.map((n) => (
-                            <div
+                            <motion.div
                                 key={n.id}
-                                draggable
-                                onDragEnd={() => handleSwipeDelete(n.id)}
+                                drag="x"
+                                dragConstraints={{ left: 0, right: 0 }}
+                                onDragEnd={(event, info) => {
+                                    if (Math.abs(info.offset.x) > 80) {
+                                        markNotificationAsRead(n, false);
+                                    }
+                                }}
                                 className="
                                     p-3 bg-gray-100 dark:bg-gray-800 rounded-xl 
-                                    shadow text-sm cursor-grab active:scale-[0.97]
+                                    shadow cursor-pointer active:scale-[0.97]
                                 "
-                                onClick={() => {
-                                    if (n.url) window.location.href = n.url;
-                                }}
+                                onClick={() => markNotificationAsRead(n)}
                             >
-                                {n.text}
-                            </div>
+                                <div className="font-semibold">{n.title}</div>
+                                <div className="text-xs opacity-70 whitespace-pre-line">
+                                    {n.body}
+                                </div>
+                            </motion.div>
                         ))}
 
                         {notifications.length === 0 && (
@@ -133,14 +206,6 @@ export default function BottomNavEmployee() {
                         )}
                     </div>
                 </div>
-            )}
-
-            {/* TŁO POD MENU */}
-            {openFabMenu && (
-                <div
-                    className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9800]"
-                    onClick={() => setOpenFabMenu(false)}
-                />
             )}
 
             {/* MENU DOLNE */}
@@ -157,8 +222,9 @@ export default function BottomNavEmployee() {
                         <NavLink
                             to="/employee/calendar"
                             className={({ isActive }) =>
-                                `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
+                                `flex flex-col items-center flex-1 text-xs ${isActive ? "text-orange-600" : "text-gray-500"
+                                }`
+                            }
                         >
                             <CalendarDays size={22} />
                             <span className="text-[11px] mt-1">Kalendarz</span>
@@ -167,8 +233,9 @@ export default function BottomNavEmployee() {
                         <NavLink
                             to="/employee/reservations"
                             className={({ isActive }) =>
-                                `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
+                                `flex flex-col items-center flex-1 text-xs ${isActive ? "text-orange-600" : "text-gray-500"
+                                }`
+                            }
                         >
                             <List size={22} />
                             <span className="text-[11px] mt-1">Rezerwacje</span>
@@ -190,8 +257,9 @@ export default function BottomNavEmployee() {
                         <NavLink
                             to="/employee/clients"
                             className={({ isActive }) =>
-                                `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
+                                `flex flex-col items-center flex-1 text-xs ${isActive ? "text-orange-600" : "text-gray-500"
+                                }`
+                            }
                         >
                             <Users size={22} />
                             <span className="text-[11px] mt-1">Klienci</span>
@@ -200,8 +268,9 @@ export default function BottomNavEmployee() {
                         <NavLink
                             to="/employee/settings"
                             className={({ isActive }) =>
-                                `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
+                                `flex flex-col items-center flex-1 text-xs ${isActive ? "text-orange-600" : "text-gray-500"
+                                }`
+                            }
                         >
                             <Settings size={22} />
                             <span className="text-[11px] mt-1">Ustawienia</span>
