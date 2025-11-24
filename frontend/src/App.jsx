@@ -343,6 +343,19 @@ function AppRoutes() {
 
 
 
+
+            <Route
+                path="/employee/:employeeId/calendar-month"
+                element={
+                    isLoggedIn && backendUser?.role === "employee" ? (
+                        <EmployeeCalendarMonthView />
+                    ) : (
+                        <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+
+
             {/* ⭐ Nowa trasa — modal powiadomienia */}
             <Route
                 path="/notification/appointment/:id"
@@ -355,16 +368,9 @@ function AppRoutes() {
                 }
             />
 
-            <Route
-                path="/employee/:employeeId/calendar-month"
-                element={
-                    isLoggedIn && backendUser?.role === "employee" ? (
-                        <EmployeeCalendarMonthView />
-                    ) : (
-                        <Navigate to={redirectByRole()} replace />
-                    )
-                }
-            />
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
+
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
