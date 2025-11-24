@@ -96,33 +96,36 @@ export default function PanelSettings() {
 
             const token = await firebaseUser.getIdToken();
 
-            // 1️⃣ Zapytanie do backendu: czy subskrypcja istnieje w bazie?
-            let backendEnabled = false;
-            try {
-                const res = await fetch(`${backend}/push/status`, {
+            // 🔥 Pobieramy subskrypcję z urządzenia
+            const reg = await navigator.serviceWorker.ready;
+            const sub = await reg.pushManager.getSubscription();
+            const endpoint = sub?.endpoint || "";
+
+            // 1️⃣ zapytanie do backendu z endpointem
+            const res = await fetch(
+                `${backend}/push/status?endpoint=${encodeURIComponent(endpoint)}`,
+                {
                     headers: {
                         Authorization: `Bearer ${token}`,
                     },
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    backendEnabled = !!data.enabled;
                 }
-            } catch (err) {
-                console.error("❌ Błąd /push/status:", err);
+            );
+
+            let backendEnabled = false;
+
+            if (res.ok) {
+                const data = await res.json();
+                backendEnabled = !!data.enabled;
             }
 
-            // 2️⃣ Sprawdzenie subskrypcji po stronie przeglądarki
-            const reg = await navigator.serviceWorker.ready;
-            const sub = await reg.pushManager.getSubscription();
-
-            // Włączone tylko gdy JEST subskrypcja i backend mówi „enabled”
+            // 2️⃣ ustawiamy stan
             setPushEnabled(backendEnabled && !!sub);
         } catch (err) {
             console.error("❌ Błąd sprawdzania PUSH:", err);
             setPushEnabled(false);
         }
     };
+
 
     // 🔁 Włącz / wyłącz powiadomienia
     const handleTogglePush = async () => {
@@ -448,11 +451,10 @@ export default function PanelSettings() {
                                                             }`}
                                                     >
                                                         <span
-                                                            className={`absolute w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform ${pushEnabled
-                                                                    ? "translate-x-5"
-                                                                    : "translate-x-[-5px]"
+                                                            className={`absolute w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform ${pushEnabled ? "translate-x-5" : "translate-x-1"
                                                                 }`}
                                                         />
+
                                                     </button>
                                                 </div>
                                             )}

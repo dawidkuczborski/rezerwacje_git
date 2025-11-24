@@ -734,22 +734,28 @@ app.post(
     })
 );
 
-// -------------------- WEB PUSH SEND --------------------
+
 app.post(
     "/push/unsubscribe",
     verifyToken,
     asyncHandler(async (req, res) => {
         const uid = req.user?.uid;
+        const { endpoint } = req.body;
+
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+        if (!endpoint)
+            return res.status(400).json({ error: "Brak endpointu do usunięcia" });
 
         await pool.query(
-            "DELETE FROM push_subscriptions WHERE uid=$1",
-            [uid]
+            `DELETE FROM push_subscriptions
+             WHERE uid=$1 AND endpoint=$2`,
+            [uid, endpoint]
         );
 
         res.json({ success: true });
     })
 );
+
 
 // -------------------- WEB PUSH STATUS --------------------
 app.get(
@@ -757,16 +763,22 @@ app.get(
     verifyToken,
     asyncHandler(async (req, res) => {
         const uid = req.user?.uid;
+        const endpoint = req.query.endpoint;
+
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+        if (!endpoint) return res.json({ enabled: false });
 
         const subRes = await pool.query(
-            "SELECT id FROM push_subscriptions WHERE uid=$1 LIMIT 1",
-            [uid]
+            `SELECT id FROM push_subscriptions
+             WHERE uid=$1 AND endpoint=$2
+             LIMIT 1`,
+            [uid, endpoint]
         );
 
         res.json({ enabled: subRes.rows.length > 0 });
     })
 );
+
 
 
 
@@ -1315,7 +1327,7 @@ app.put(
                             title: `Nowy termin — ${clientFullName}`,
                             body:
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
-                                `nowo: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
+                                `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
                             url: `/employee/appointment/${updated.id}`
                         });
 
@@ -1333,7 +1345,7 @@ app.put(
                             body:
                                 `Pracownik: ${employeeName}\n` +
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
-                                `nowo: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
+                                `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
                             url: `/employee/appointment/${updated.id}`
                         });
 
