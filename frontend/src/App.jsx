@@ -109,7 +109,8 @@ function AppRoutes() {
 
     return (
         <Routes>
-            <Route path="/" element={<Navigate to={redirectByRole()} replace />} />
+            <Route path="/" element={<Navigate to="/salons" replace />} />
+
 
             {/* 🔥 Login */}
             <Route
@@ -139,37 +140,11 @@ function AppRoutes() {
                 }
             />
 
-            <Route
-                path="/salons"
-                element={
-                    isLoggedIn && backendUser?.role === "client" ? (
-                        <SalonSelect
-                            onSelect={(s) => {
-                                localStorage.setItem("selectedSalon", JSON.stringify(s));
-                                window.location.href = "/services";
-                            }}
-                        />
-                    ) : (
-                        <Navigate to={redirectByRole()} replace />
-                    )
-                }
-            />
+            <Route path="/salons" element={<SalonSelect />} />
 
-            <Route
-                path="/services"
-                element={
-                    isLoggedIn && backendUser?.role === "client" ? (
-                        <ServiceSelect
-                            onSelect={(srv) => {
-                                localStorage.setItem("selectedService", JSON.stringify(srv));
-                                window.location.href = "/booking";
-                            }}
-                        />
-                    ) : (
-                        <Navigate to={redirectByRole()} replace />
-                    )
-                }
-            />
+
+            <Route path="/services" element={<ServiceSelect />} />
+
 
             <Route
                 path="/booking"

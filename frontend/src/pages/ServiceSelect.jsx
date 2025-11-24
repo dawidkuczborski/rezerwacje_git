@@ -188,7 +188,13 @@ const fullService = {
 delete fullService.fromRebook;
 
 localStorage.setItem("selectedService", JSON.stringify(fullService));
-navigate("/booking");
+          // 🔐 jeśli nie zalogowany → przekieruj na login z powrotem do booking
+          if (!localStorage.getItem("authToken")) {
+              localStorage.setItem("redirect_after_login", "/booking");
+              navigate("/login");
+              return;
+          }
+
 
 
 

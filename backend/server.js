@@ -1591,24 +1591,79 @@ app.get(
     "/api/salon-select/init",
     verifyToken,
     asyncHandler(async (req, res) => {
-        const uid = req.user?.uid;
-        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        const uid = req.user?.uid || null;
 
         // ⬅️ PAGINACJA
         const page = Number(req.query.page) || 1;
         const limit = Number(req.query.limit) || 12;
         const offset = (page - 1) * limit;
 
-        // 🔥 Wykonujemy 4 zapytania równolegle
+        // ===============================
+        // 🟡 1) UŻYTKOWNIK NIEZALOGOWANY
+        // ===============================
+        if (!uid) {
+            const [salonsRes, countRes] = await Promise.all([
+                pool.query(`
+                    SELECT 
+                        s.id,
+                        s.name,
+                        s.city,
+                        s.street,
+                        s.street_number,
+                        s.phone,
+                        s.description,
+                        s.image_url,
+                        COALESCE(r.avg_rating, 0) AS average,
+                        COALESCE(r.total_reviews, 0) AS total_reviews
+                    FROM salons s
+                    LEFT JOIN (
+                        SELECT 
+                            salon_id,
+                            ROUND(AVG(rating)::numeric, 1) AS avg_rating,
+                            COUNT(*) AS total_reviews
+                        FROM salon_reviews
+                        GROUP BY salon_id
+                    ) r ON r.salon_id = s.id
+                    WHERE s.is_active = true
+                    ORDER BY s.name ASC
+                    LIMIT $1 OFFSET $2;
+                `, [limit, offset]),
+
+                pool.query(`SELECT COUNT(*) FROM salons WHERE is_active = true;`)
+            ]);
+
+            const ratingsMap = {};
+            for (const s of salonsRes.rows) {
+                ratingsMap[s.id] = {
+                    average: Number(s.average) || 0,
+                    total: Number(s.total_reviews) || 0
+                };
+            }
+
+            return res.json({
+                user: null,
+                appointments: [],
+                salons: salonsRes.rows,
+                ratings: ratingsMap,
+                totalSalons: Number(countRes.rows[0].count),
+                page,
+                limit
+            });
+        }
+
+        // ===============================
+        // 🟢 2) UŻYTKOWNIK ZALOGOWANY
+        // ===============================
         const [userRes, appointmentRes, salonsRes, countRes] = await Promise.all([
 
-            // 1) User
+            // USER
             pool.query(
                 `SELECT uid, name, email FROM users WHERE uid = $1 LIMIT 1`,
                 [uid]
             ),
 
-            // 2) Appointments
+            // APPOINTMENTS
             pool.query(`
                 SELECT 
                     a.*, 
@@ -1636,7 +1691,7 @@ app.get(
                 ORDER BY a.date DESC, a.start_time DESC
             `, [uid]),
 
-            // 3) PAGINOWANE salony + oceny
+            // SALONS + RATINGS
             pool.query(`
                 SELECT 
                     s.id,
@@ -1663,11 +1718,9 @@ app.get(
                 LIMIT $1 OFFSET $2;
             `, [limit, offset]),
 
-            // 4) Ilość wszystkich salonów (do paginacji)
             pool.query(`SELECT COUNT(*) FROM salons WHERE is_active = true;`)
         ]);
-        ///zmiany///
-        // 🔧 Mapa ocen { salonId: { average, total } }
+
         const ratingsMap = {};
         for (const s of salonsRes.rows) {
             ratingsMap[s.id] = {
@@ -1687,6 +1740,7 @@ app.get(
         });
     })
 );
+
 
 
 

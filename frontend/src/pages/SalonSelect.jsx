@@ -162,9 +162,20 @@ export default function SalonSelect() {
     // LOAD INITIAL: instant paint + background fetch
     const loadInitial = useCallback(async () => {
         if (!firebaseUser) {
+            try {
+                const res = await axios.get(`${backendBase}/api/salon-select/init?page=1&limit=${limit}`);
+                const { salons: salonsPage, ratings, totalSalons: total } = res.data;
+
+                setSalons(salonsPage || []);
+                setRatingsMap(ratings || {});
+                setTotalSalons(total || 0);
+            } catch (err) {
+                console.error("PUBLIC INIT FETCH ERROR:", err);
+            }
             setLoadingInitial(false);
             return;
         }
+
 
         setLoadingInitial(true);
         // try cached page first
@@ -216,17 +227,29 @@ export default function SalonSelect() {
     // load more / pagination
     const loadMore = useCallback(
         async (nextPage) => {
-            if (!firebaseUser || loading) return;
+            if (loading) return;
             setLoading(true);
 
             const ctrl = new AbortController();
             addController(ctrl);
+
             try {
-                const token = await firebaseUser.getIdToken();
-                const res = await axios.get(`${backendBase}/api/salon-select/init?page=${nextPage}&limit=${limit}`, {
-                    headers: { Authorization: `Bearer ${token}` },
-                    signal: ctrl.signal,
-                });
+                let res;
+
+                if (firebaseUser) {
+                    const token = await firebaseUser.getIdToken();
+                    res = await axios.get(
+                        `${backendBase}/api/salon-select/init?page=${nextPage}&limit=${limit}`,
+                        { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal }
+                    );
+                } else {
+                    // PUBLIC REQUEST bez tokena
+                    res = await axios.get(
+                        `${backendBase}/api/salon-select/init?page=${nextPage}&limit=${limit}`,
+                        { signal: ctrl.signal }
+                    );
+                }
+
                 if (!isMounted.current) return;
 
                 const { salons: newSalons, ratings: newRatings } = res.data;
@@ -237,12 +260,9 @@ export default function SalonSelect() {
                     setPage(nextPage);
                 });
 
-                // cache page
                 writeCachedPage(nextPage, limit, { salons: newSalons, ratings: newRatings, totalSalons });
             } catch (err) {
-                if (!axios.isCancel(err) && err.name !== "CanceledError") {
-                    console.error("LOAD MORE ERROR:", err);
-                }
+                if (!axios.isCancel(err)) console.error("LOAD MORE ERROR:", err);
             } finally {
                 removeController(ctrl);
                 if (isMounted.current) setLoading(false);
@@ -250,6 +270,7 @@ export default function SalonSelect() {
         },
         [firebaseUser, backendBase, limit, loading, writeCachedPage, totalSalons]
     );
+
 
     // refresh appointments (debounced)
     const refreshAppointments = useCallback(async () => {
@@ -269,9 +290,9 @@ export default function SalonSelect() {
 
     // initial & visibility effects
     useEffect(() => {
-        if (!firebaseUser) return;
         loadInitial();
     }, [firebaseUser, loadInitial]);
+
 
     useEffect(() => {
         const onVisibility = () => {

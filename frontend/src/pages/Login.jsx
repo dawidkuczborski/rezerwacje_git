@@ -136,10 +136,20 @@ export default function Login() {
                 return;
             }
 
+            let redirect = localStorage.getItem("redirect_after_login");
+
+            if (redirect) {
+                localStorage.removeItem("redirect_after_login");
+                window.location.href = redirect;
+                return;
+            }
+
+            // standardowy redirect
             if (role === "client") {
                 window.location.href = "/salons";
                 return;
             }
+
 
             setMsg("❌ Konto nie ma przypisanej roli.");
 
