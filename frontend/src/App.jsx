@@ -5,6 +5,7 @@ import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
 import ScrollToTop from "./components/ScrollToTop";
 import NotificationModalRouteWrapper from "./components/NotificationModalRouteWrapper";
+import NotificationAppointmentModal from "./components/NotificationAppointmentModal";
 
 
 // NOWE: jedna strona logowania
@@ -372,8 +373,6 @@ function AppRoutes() {
             <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
 
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
         </Routes>
     );
 }
