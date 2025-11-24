@@ -94,6 +94,19 @@ function AppRoutes() {
         return "/login";
     };
 
+
+    // Global listener — musi być załadowany zanim pojawią się komponenty
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.addEventListener("message", (event) => {
+            if (event.data?.type === "NEW_NOTIFICATION") {
+                const n = event.data.payload;
+                window.dispatchEvent(
+                    new CustomEvent("app-notification", { detail: n })
+                );
+            }
+        });
+    }
+
     return (
         <Routes>
             <Route path="/" element={<Navigate to={redirectByRole()} replace />} />
