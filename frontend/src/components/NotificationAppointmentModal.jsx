@@ -97,7 +97,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                     </div>
 
                     {/* BODY */}
-                    <div className="-mt-6 bg-white dark:bg-[#1a1a1a] rounded-t-[32px] px-6 py-8 space-y-8 flex-1">
+                    <div className="-mt-6 bg-white dark:bg-[#1a1a1a] px-6 py-8 space-y-8 flex-1">
                         {!appointment ? (
                             <div className="text-center text-gray-400">Ładowanie…</div>
                         ) : (
