@@ -723,29 +723,17 @@ app.post(
 
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-        // znajdź pracownika po UID
-        const empRes = await pool.query(
-            "SELECT id FROM employees WHERE uid=$1",
-            [uid]
-        );
-
-        if (empRes.rows.length === 0) {
-            return res.status(403).json({
-                error: "Tylko pracownik może subskrybować powiadomienia"
-            });
-        }
-
-        const employeeId = empRes.rows[0].id;
-
         await pool.query(
-            `INSERT INTO push_subscriptions (employee_id, subscription)
-             VALUES ($1, $2)`,
-            [employeeId, subscription]
+            `INSERT INTO push_subscriptions (uid, subscription)
+             VALUES ($1, $2)
+             ON CONFLICT DO NOTHING`,
+            [uid, subscription]
         );
 
         res.json({ success: true });
     })
 );
+
 // -------------------- WEB PUSH SEND --------------------
 app.post(
     "/push/unsubscribe",
@@ -754,52 +742,26 @@ app.post(
         const uid = req.user?.uid;
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-        const empRes = await pool.query(
-            "SELECT id FROM employees WHERE uid=$1",
-            [uid]
-        );
-
-        if (empRes.rows.length === 0) {
-            return res.status(403).json({ error: "Tylko pracownicy mogą zarządzać powiadomieniami" });
-        }
-
-        const employeeId = empRes.rows[0].id;
-
         await pool.query(
-            "DELETE FROM push_subscriptions WHERE employee_id=$1",
-            [employeeId]
+            "DELETE FROM push_subscriptions WHERE uid=$1",
+            [uid]
         );
 
         res.json({ success: true });
     })
 );
+
 // -------------------- WEB PUSH STATUS --------------------
 app.get(
     "/push/status",
     verifyToken,
     asyncHandler(async (req, res) => {
         const uid = req.user?.uid;
-
         if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
 
-        // znajdź pracownika
-        const empRes = await pool.query(
-            "SELECT id FROM employees WHERE uid=$1",
-            [uid]
-        );
-
-        if (empRes.rows.length === 0) {
-            return res.status(403).json({
-                error: "Tylko pracownik może mieć powiadomienia PUSH"
-            });
-        }
-
-        const employeeId = empRes.rows[0].id;
-
-        // sprawdź czy ma subskrypcję
         const subRes = await pool.query(
-            "SELECT id FROM push_subscriptions WHERE employee_id=$1 LIMIT 1",
-            [employeeId]
+            "SELECT id FROM push_subscriptions WHERE uid=$1 LIMIT 1",
+            [uid]
         );
 
         res.json({ enabled: subRes.rows.length > 0 });
@@ -807,18 +769,19 @@ app.get(
 );
 
 
+
 app.post(
     "/push/send",
     asyncHandler(async (req, res) => {
-        const { employee_id, title, body, url } = req.body;
+        const { uid, title, body, url } = req.body;
 
-        if (!employee_id || !title) {
+        if (!uid || !title) {
             return res.status(400).json({ error: "Brak wymaganych danych" });
         }
 
         const rows = await pool.query(
-            "SELECT subscription FROM push_subscriptions WHERE employee_id=$1",
-            [employee_id]
+            "SELECT subscription FROM push_subscriptions WHERE uid=$1",
+            [uid]
         );
 
         for (const row of rows.rows) {
@@ -829,7 +792,7 @@ app.post(
                         : row.subscription;
 
                 const payloadString = JSON.stringify({
-                    title: String(title || ""),
+                    title: String(title),
                     body: String(body || ""),
                     url: String(url || "/")
                 });
@@ -843,6 +806,7 @@ app.post(
         res.json({ success: true, sent: rows.rows.length });
     })
 );
+
 
 
 // 🔍 Ultra-fast Advanced salon search (optimized)
@@ -6303,28 +6267,49 @@ app.post(
                 console.error("⚠️ Nie udało się wysłać eventu calendar_updated (NEW):", err);
             }
 
+
+
             /* ------------------------------------------------------
-   🔔 WEB PUSH – powiadom pracownika o nowej wizycie
+   🔔 WEB PUSH – powiadom pracownika i providera o nowej wizycie
 ------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
-                // pobierz subskrypcje pracownika
-                const subs = await pool.query(
-                    "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                // ░░░ 1. Pobierz UID pracownika ░░░
+                const empUidRes = await pool.query(
+                    "SELECT uid FROM employees WHERE id=$1",
                     [employee_id]
+                );
+                const employeeUid = empUidRes.rows[0]?.uid;
+
+                // ░░░ 2. Pobierz UID PROVIDERA ░░░
+                const ownerRes = await pool.query(
+                    "SELECT owner_uid FROM salons WHERE id=$1",
+                    [salon_id]
+                );
+                const providerUid = ownerRes.rows[0]?.owner_uid;
+
+                // Provider może mieć takie samo UID jak pracownik → usuwamy duplikaty
+                const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
+
+                // ░░░ 3. Pobierz subskrypcje pracownika i providera ░░░
+                const subs = await pool.query(
+                    `SELECT subscription 
+         FROM push_subscriptions
+         WHERE uid = ANY($1::text[])`,
+                    [uidsToNotify]
                 );
 
                 console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
-                // 🔹 Pobierz nazwę usługi
+                // ░░░ 4. Nazwa usługi ░░░
                 const serviceRow = await pool.query(
                     `SELECT name FROM services WHERE id=$1`,
                     [service_id]
                 );
                 const serviceName = serviceRow.rows[0]?.name || "";
 
-                // 🔹 Pobierz nazwy dodatków
+                // ░░░ 5. Dodatki ░░░
                 const addonIds = Array.isArray(addons) ? addons.map(Number) : [];
                 let addonNames = [];
 
@@ -6336,10 +6321,9 @@ app.post(
                     addonNames = addRes.rows.map(a => a.name);
                 }
 
-                const addonsText =
-                    addonNames.length > 0 ? " + " + addonNames.join(" + ") : "";
+                const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
-                // 🔹 Format daty PL (bez dnia tygodnia)
+                // ░░░ 6. Format daty ░░░
                 const dt = new Date(date + "T" + start_time);
                 const formattedDate = dt.toLocaleDateString("pl-PL", {
                     day: "numeric",
@@ -6347,28 +6331,25 @@ app.post(
                     year: "numeric",
                 });
 
-                // 🔹 Imię + nazwisko klienta
+                // ░░░ 7. Imię + nazwisko klienta ░░░
                 const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
 
-                // 🔹 Tekst powiadomienia
+                // ░░░ 8. Treść powiadomienia ░░░
                 const bodyText =
                     `${formattedDate} • ${start_time}–${end_time} • ` +
                     `${serviceName}${addonsText}`;
 
+                // ░░░ 9. Wysyłanie powiadomień ░░░
                 for (const row of subs.rows) {
                     try {
-                        const subscription = row.subscription;
-
                         const payloadString = JSON.stringify({
                             title: `Nowa rezerwacja - ${clientFullName}`,
                             body: bodyText,
                             url: `/employee/appointment/${appointmentId}`,
                         });
 
-                        await webpush.sendNotification(subscription, payloadString);
-
+                        await webpush.sendNotification(row.subscription, payloadString);
                         console.log("✔️ Push wysłany");
-
                     } catch (err) {
                         console.error("❌ PUSH ERROR:", err.message);
 
@@ -6381,6 +6362,7 @@ app.post(
                         }
                     }
                 }
+
             } catch (err) {
                 console.error("❌ GLOBAL PUSH ERROR:", err);
             }
