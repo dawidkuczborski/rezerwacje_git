@@ -728,16 +728,14 @@ app.post(
         await pool.query(
             `INSERT INTO push_subscriptions (uid, subscription, endpoint)
              VALUES ($1, $2, $3)
-             ON CONFLICT (endpoint) DO NOTHING`,
+             ON CONFLICT (uid, endpoint) DO UPDATE
+             SET subscription = EXCLUDED.subscription`,
             [uid, subscription, subscription.endpoint]
         );
 
         res.json({ success: true });
     })
 );
-
-
-
 app.post(
     "/push/unsubscribe",
     verifyToken,
@@ -758,9 +756,6 @@ app.post(
         res.json({ success: true });
     })
 );
-
-
-// -------------------- WEB PUSH STATUS --------------------
 app.get(
     "/push/status",
     verifyToken,
@@ -781,6 +776,7 @@ app.get(
         res.json({ enabled: subRes.rows.length > 0 });
     })
 );
+
 
 
 
