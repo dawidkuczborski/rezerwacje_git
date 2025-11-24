@@ -4,6 +4,7 @@ import AuthProvider, { useAuth } from "./components/AuthProvider";
 import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
 import ScrollToTop from "./components/ScrollToTop";
+import NotificationModalRouteWrapper from "./components/NotificationModalRouteWrapper";
 
 
 // NOWE: jedna strona logowania
@@ -336,6 +337,20 @@ function AppRoutes() {
                         <Reservations />
                     ) : (
                         <Navigate to={redirectByRole()} replace />
+                    )
+                }
+            />
+
+
+
+            {/* ⭐ Nowa trasa — modal powiadomienia */}
+            <Route
+                path="/notification/appointment/:id"
+                element={
+                    isLoggedIn ? (
+                        <NotificationModalRouteWrapper />
+                    ) : (
+                        <Navigate to="/login" replace />
                     )
                 }
             />

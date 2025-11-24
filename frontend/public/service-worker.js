@@ -7,7 +7,6 @@ self.addEventListener("push", (event) => {
     try {
         data = event.data.json();
     } catch (e) {
-        // np. Safari wysyła czysty tekst
         data = { title: "Powiadomienie", body: event.data.text() };
     }
 
@@ -24,24 +23,31 @@ self.addEventListener("push", (event) => {
     event.waitUntil(self.registration.showNotification(title, options));
 });
 
+
 // ======== KLIKNIĘCIE POWIADOMIENIA ========
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
 
-    const url = event.notification.data?.url || "/";
+    const urlToOpen = event.notification.data?.url || "/";
 
     event.waitUntil(
         clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+
+            // Jeśli aplikacja jest już otwarta → przełącz i otwórz URL
             for (const client of clientList) {
-                if ("focus" in client) {
-                    client.navigate(url);
-                    return client.focus();
+                if (client.url.includes(self.location.origin)) {
+                    client.focus();
+                    // bardzo ważne: *wysyłamy event do okna SPA* zamiast navigate
+                    client.postMessage({
+                        type: "OPEN_NOTIFICATION_URL",
+                        url: urlToOpen
+                    });
+                    return;
                 }
             }
 
-            if (clients.openWindow) {
-                return clients.openWindow(url);
-            }
+            // Jeśli NIE MA otwartego okna → otwórz nowe
+            return clients.openWindow(urlToOpen);
         })
     );
 });
