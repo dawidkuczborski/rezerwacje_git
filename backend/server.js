@@ -6053,9 +6053,12 @@ app.post(
                 const serviceName = svcRes.rows[0]?.name || "";
 
                 const addonsRes = await pool.query(
-                    `SELECT name FROM addons WHERE id = ANY($1)`,
-                    [addons]
-                );
+                    `SELECT name 
+                 FROM service_addons 
+                 WHERE id = ANY($1::int[])`,
+                                [addonIds]
+                            );
+
                 const addonsList = addonsRes.rows.map(a => a.name);
 
                 const addonsText = addonsList.length
