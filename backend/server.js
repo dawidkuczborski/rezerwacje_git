@@ -6477,7 +6477,7 @@ app.post(
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
-                // ░░░ 1. Pobierz UID i nazwę pracownika ░░░
+                // 1. Pobierz pracownika
                 const empDataRes = await pool.query(
                     "SELECT uid, name FROM employees WHERE id=$1",
                     [employee_id]
@@ -6485,17 +6485,16 @@ app.post(
                 const employeeUid = empDataRes.rows[0]?.uid;
                 const employeeName = empDataRes.rows[0]?.name || "Pracownik";
 
-                // ░░░ 2. Pobierz UID PROVIDERA ░░░
+                // 2. Provider
                 const ownerRes = await pool.query(
                     "SELECT owner_uid FROM salons WHERE id=$1",
                     [salon_id]
                 );
                 const providerUid = ownerRes.rows[0]?.owner_uid;
 
-                // odbiorcy
                 const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
-                // ░░░ 3. Pobierz subskrypcje pracownika i providera ░░░
+                // 3. Subskrypcje push
                 const subs = await pool.query(
                     `SELECT uid, subscription 
          FROM push_subscriptions
@@ -6503,14 +6502,14 @@ app.post(
                     [uidsToNotify]
                 );
 
-                // ░░░ 4. Nazwa usługi
+                // 4. Nazwa usługi
                 const serviceRow = await pool.query(
                     `SELECT name FROM services WHERE id=$1`,
                     [service_id]
                 );
                 const serviceName = serviceRow.rows[0]?.name || "";
 
-                // ░░░ 5. Dodatki
+                // 5. Dodatki
                 const addonIds = Array.isArray(addons) ? addons.map(Number) : [];
                 let addonNames = [];
 
@@ -6524,7 +6523,7 @@ app.post(
 
                 const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
-                // ░░░ 6. Format daty
+                // 6. Format
                 const dt = new Date(date + "T" + start_time);
                 const formattedDate = dt.toLocaleDateString("pl-PL", {
                     day: "numeric",
@@ -6532,79 +6531,92 @@ app.post(
                     year: "numeric",
                 });
 
-                // ░░░ 7. Imię + nazwisko klienta
                 const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
 
                 // -------------------------------------------
-                // 🔥 8. ZAPIS POWIADOMIEŃ DO BAZY (NOWE!)
+                // 🔥 8. ZAPIS POWIADOMIEŃ – TERAZ ZWRACA notification_id
                 // -------------------------------------------
 
-                // powiadomienie pracownika
+                let employeeNotificationId = null;
+                let providerNotificationId = null;
+
+                // pracownik
                 if (employeeUid) {
-                    await pool.query(
-                        `INSERT INTO notifications (uid, title, body, url)
-             VALUES ($1, $2, $3, $4)`,
+                    const res = await pool.query(
+                        `INSERT INTO notifications (uid, title, body)
+             VALUES ($1, $2, $3)
+             RETURNING id`,
                         [
                             employeeUid,
                             `Nowa wizyta – ${clientFullName}`,
-                            `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
-                            `/notification/appointment/${appointmentId}`
+                            `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`
+                        ]
+                    );
+
+                    employeeNotificationId = res.rows[0].id;
+
+                    // aktualizacja URL
+                    await pool.query(
+                        `UPDATE notifications SET url = $1 WHERE id = $2`,
+                        [
+                            `/notification/appointment/${appointmentId}?notification_id=${employeeNotificationId}`,
+                            employeeNotificationId
                         ]
                     );
                 }
 
-                // powiadomienie providera
+                // provider
                 if (providerUid) {
-                    await pool.query(
-                        `INSERT INTO notifications (uid, title, body, url)
-             VALUES ($1, $2, $3, $4)`,
+                    const res = await pool.query(
+                        `INSERT INTO notifications (uid, title, body)
+             VALUES ($1, $2, $3)
+             RETURNING id`,
                         [
                             providerUid,
                             `Nowa wizyta – ${clientFullName}`,
-                            `Pracownik: ${employeeName}\n${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
-                            `/notification/appointment/${appointmentId}`
+                            `Pracownik: ${employeeName}\n${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`
+                        ]
+                    );
+
+                    providerNotificationId = res.rows[0].id;
+
+                    // aktualizacja URL
+                    await pool.query(
+                        `UPDATE notifications SET url = $1 WHERE id = $2`,
+                        [
+                            `/notification/appointment/${appointmentId}?notification_id=${providerNotificationId}`,
+                            providerNotificationId
                         ]
                     );
                 }
 
-
                 // -------------------------------------------
-                // 🔔 9. Wysyłka push (bez zmian)
+                // 🔔 9. PUSH – URL musi mieć notification_id
                 // -------------------------------------------
                 for (const row of subs.rows) {
                     const targetUid = row.uid;
 
-                    // ⭐ Worker
-                    if (targetUid === employeeUid) {
-                        const payload = JSON.stringify({
-                            title: `Nowa wizyta – ${clientFullName}`,
-                            body: `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${appointmentId}`,
-                        });
+                    let notifId = null;
 
-                        try {
-                            await webpush.sendNotification(row.subscription, payload);
-                        } catch (err) {
-                            console.error("❌ PUSH EMPLOYEE ERROR:", err.message);
-                        }
-                    }
+                    if (targetUid === employeeUid) notifId = employeeNotificationId;
+                    if (targetUid === providerUid) notifId = providerNotificationId;
 
-                    // ⭐ Provider
-                    if (targetUid === providerUid) {
-                        const payload = JSON.stringify({
-                            title: `Nowa wizyta – ${clientFullName}`,
-                            body:
-                                `Pracownik: ${employeeName}\n` +
-                                `${formattedDate} • ${start_time}–${end_time}\n` +
-                                `${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${appointmentId}`,
-                        });
+                    const url = `/notification/appointment/${appointmentId}?notification_id=${notifId}`;
 
-                        try {
-                            await webpush.sendNotification(row.subscription, payload);
-                        } catch (err) {
-                            console.error("❌ PUSH PROVIDER ERROR:", err.message);
-                        }
+                    const payload = JSON.stringify({
+                        title: targetUid === employeeUid
+                            ? `Nowa wizyta – ${clientFullName}`
+                            : `Nowa wizyta – ${clientFullName}`,
+                        body: targetUid === employeeUid
+                            ? `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`
+                            : `Pracownik: ${employeeName}\n${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
+                        url
+                    });
+
+                    try {
+                        await webpush.sendNotification(row.subscription, payload);
+                    } catch (err) {
+                        console.error("❌ PUSH ERROR:", err.message);
                     }
                 }
 

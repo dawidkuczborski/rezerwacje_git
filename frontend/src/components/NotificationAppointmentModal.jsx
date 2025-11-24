@@ -2,11 +2,15 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Phone, History } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 export default function NotificationAppointmentModal({ open, appointmentId }) {
     const [appointment, setAppointment] = useState(null);
     const navigate = useNavigate();
+
+    // 🔥 tu pobieramy ID powiadomienia z URL
+    const [params] = useSearchParams();
+    const notificationId = params.get("notification_id");
 
     const backendBase = import.meta.env.VITE_API_URL;
     const authHeaders = () => ({
@@ -34,30 +38,32 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         load();
     }, [open, appointmentId]);
 
-    // ==============================================
-    // 🚀 AUTOMATYCZNE OZNACZENIE POWIADOMIENIA PO ZAMKNIĘCIU MODALA
-    // ==============================================
-    useEffect(() => {
-        return () => {
-            if (window._afterNotificationModalClose) {
-                try {
-                    window._afterNotificationModalClose();
-                } catch (e) {
-                    console.error("Notification mark-read error:", e);
-                }
-                window._afterNotificationModalClose = null;
-            }
-        };
-    }, []);
+    // ============================
+    // 🔥 oznacz powiadomienie po ZAMKNIĘCIU modala
+    // ============================
+    const markNotificationRead = async () => {
+        if (!notificationId) return;
 
-    if (!open) return null;
+        try {
+            await axios.post(
+                backendBase + "/notifications/mark-read",
+                { id: notificationId },
+                authHeaders()
+            );
+        } catch (err) {
+            console.error("mark-read error", err);
+        }
+    };
 
     // ============================
     // 🔥 Zamknięcie modala
     // ============================
-    const closeToCalendar = () => {
+    const closeToCalendar = async () => {
+        await markNotificationRead();
         navigate(-1); // wróć do poprzedniej strony
     };
+
+    if (!open) return null;
 
     const formatDatePL = (d) => {
         try {
