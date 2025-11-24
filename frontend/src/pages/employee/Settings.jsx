@@ -262,13 +262,22 @@ export default function PanelSettings() {
             label: "Urlopy",
             icon: CalendarDays,
         },
+
+        // ⭐ NOWA SEKCJA POWIADOMIEŃ – identyczna jak u pracownika
+        {
+            id: "notifications",
+            label: "Powiadomienia",
+            icon: Bell,
+            children: [{ id: "center", label: "Centrum powiadomień" }],
+        },
+
         {
             id: "info",
             label: "Informacje",
             icon: UserCog,
             children: [
                 { id: "my-profile", label: "Mój profil" },
-                { id: "notifications", label: "Powiadomienia" },
+                // ❌ usunięto stary błędny wpis powiadomień
             ],
         },
         {
@@ -281,6 +290,7 @@ export default function PanelSettings() {
             ],
         },
     ];
+
 
     const employeeOptions = [
         {
