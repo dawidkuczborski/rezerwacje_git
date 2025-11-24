@@ -45,36 +45,39 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         }
     };
 
+    // 🟣 ZMIANA TERMINU tylko jeśli status = booked
     const isChanged =
-        appointment?.previous_date ||
-        appointment?.previous_start_time ||
-        appointment?.previous_end_time;
+        appointment?.status === "booked" &&
+        (
+            appointment?.previous_date ||
+            appointment?.previous_start_time ||
+            appointment?.previous_end_time
+        );
 
+    // 🟩 STATUSY PL
     const translateStatus = () => {
-        if (isChanged) return "Zmieniona";
+        const st = appointment?.status;
 
-        switch (appointment?.status) {
-            case "cancelled":
-                return "Anulowana";
-            case "completed":
-                return "Zakończona";
-            default:
-                return "Zarezerwowana";
-        }
+        if (st === "cancelled") return "Anulowana";
+        if (st === "completed") return "Zakończona";
+        if (isChanged) return "Zmieniona";
+        return "Zarezerwowana";
     };
 
+    // 🟦 KOLORY STATUSÓW
     const statusBadge = () => {
+        const st = appointment?.status;
+
+        if (st === "cancelled")
+            return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300";
+
+        if (st === "completed")
+            return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
+
         if (isChanged)
             return "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300";
 
-        switch (appointment?.status) {
-            case "cancelled":
-                return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300";
-            case "completed":
-                return "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300";
-            default:
-                return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
-        }
+        return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
     };
 
     return (
@@ -89,15 +92,16 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                     initial={{ y: 60 }}
                     animate={{ y: 0 }}
                     exit={{ y: 60 }}
-                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto rounded-t-3xl flex flex-col"
+                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col" // 🔥 usunięte rounded
                 >
-                    {/* HEADER */}
+                    {/* HEADER (zostaje zaokrąglony) */}
                     <div className="bg-[#e57b2c] dark:bg-[#b86422] px-6 pt-[calc(env(safe-area-inset-top)+22px)] pb-8 text-white flex justify-center items-center rounded-t-3xl">
                         <h2 className="text-[20px] font-semibold">Szczegóły wizyty</h2>
                     </div>
 
                     {/* BODY */}
-                    <div className="-mt-6 bg-white dark:bg-[#1a1a1a] px-6 py-8 space-y-8 flex-1">
+                    <div className="px-6 py-8 space-y-8 flex-1">
+
                         {!appointment ? (
                             <div className="text-center text-gray-400">Ładowanie…</div>
                         ) : (
@@ -170,8 +174,8 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                                     </div>
                                 </div>
 
-                                {/* HISTORIA ZMIAN */}
-                                {isChanged && (
+                                {/* HISTORIA ZMIAN — tylko gdy booked i zmieniona */}
+                                {appointment.status === "booked" && isChanged && (
                                     <div className="pt-4">
                                         <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
                                             <History size={15} /> Historia zmian

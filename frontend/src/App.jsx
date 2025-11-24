@@ -1,12 +1,18 @@
-import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import React, { useEffect } from "react";
+import {
+    BrowserRouter as Router,
+    Routes,
+    Route,
+    Navigate,
+    useLocation,
+    useNavigate
+} from "react-router-dom";
 import AuthProvider, { useAuth } from "./components/AuthProvider";
 import BottomNav from "./components/BottomNav";
 import BottomNavEmployee from "./components/BottomNavEmployee";
 import ScrollToTop from "./components/ScrollToTop";
 import NotificationModalRouteWrapper from "./components/NotificationModalRouteWrapper";
-import NotificationAppointmentModal from "./components/NotificationAppointmentModal";
-
+// import NotificationAppointmentModal from "./components/NotificationAppointmentModal"; // 👈 już niepotrzebne
 
 // NOWE: jedna strona logowania
 import Login from "./pages/Login";
@@ -33,7 +39,6 @@ import ScheduleManager from "./pages/ScheduleManager";
 import PortfolioManager from "./pages/PortfolioManager";
 import ChooseSalon from "./pages/ChooseSalon";
 
-
 // Panel pracownika
 import EmployeeCalendar from "./pages/employee/EmployeeCalendar";
 import EmployeeCalendarMonthView from "./pages/employee/EmployeeCalendarMonthView";
@@ -41,7 +46,6 @@ import Vacations from "./pages/employee/Vacations";
 import Clients from "./pages/employee/Clients";
 import Settings from "./pages/employee/Settings";
 import Reservations from "./pages/employee/Reservations";
-
 
 function AppRoutes() {
     const { firebaseUser, backendUser, loading } = useAuth();
@@ -342,9 +346,6 @@ function AppRoutes() {
                 }
             />
 
-
-
-
             <Route
                 path="/employee/:employeeId/calendar-month"
                 element={
@@ -355,7 +356,6 @@ function AppRoutes() {
                     )
                 }
             />
-
 
             {/* ⭐ Nowa trasa — modal powiadomienia */}
             <Route
@@ -371,26 +371,44 @@ function AppRoutes() {
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to={redirectByRole()} replace />} />
-
-
         </Routes>
     );
 }
 
 //
-// ⭐ POPRAWIONA CZĘŚĆ – UKRYWANIE MENU
+// ⭐ LAYOUT + NASŁUCH Z SERVICE WORKERA
 //
 function AppLayout() {
     const location = useLocation();
+    const navigate = useNavigate();
 
     // Strony bez menu
     const hideMenuOn = ["/login", "/register-client", "/register-provider"];
 
     const shouldHideMenu = hideMenuOn.includes(location.pathname);
 
+    // 🔥 TU NASŁUCHUJEMY NA KLIKNIĘCIA POWIADOMIEŃ, GDY APP JEST OTWARTA
+    useEffect(() => {
+        if (!("serviceWorker" in navigator)) return;
+
+        const handler = (event) => {
+            if (event.data?.type === "OPEN_NOTIFICATION_URL") {
+                const url = event.data.url;
+                if (url) {
+                    navigate(url);
+                }
+            }
+        };
+
+        navigator.serviceWorker.addEventListener("message", handler);
+
+        return () => {
+            navigator.serviceWorker.removeEventListener("message", handler);
+        };
+    }, [navigate]);
+
     return (
         <>
-            {/* 👇 DODANE TUTAJ */}
             <ScrollToTop />
 
             <div className="pb-[70px] transition-colors duration-500">

@@ -1,4 +1,6 @@
-﻿// ======== PUSH EVENT ========
+﻿// =======================================
+// 🔔 ODBIÓR PUSH
+// =======================================
 self.addEventListener("push", (event) => {
     console.log("[SW] Push odebrany:", event.data?.text());
 
@@ -24,7 +26,9 @@ self.addEventListener("push", (event) => {
 });
 
 
-// ======== KLIKNIĘCIE POWIADOMIENIA ========
+// =======================================
+// 🔔 KLIKNIĘCIE POWIADOMIENIA
+// =======================================
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
 
@@ -33,20 +37,24 @@ self.addEventListener("notificationclick", (event) => {
     event.waitUntil(
         clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
 
-            // Jeśli aplikacja jest już otwarta → przełącz i otwórz URL
+            // 🔥 1) Aplikacja JEST już otwarta → wysyłamy event do SPA
             for (const client of clientList) {
-                if (client.url.includes(self.location.origin)) {
+                // sprawdzamy tylko okna naszego hosta
+                if (client.url.startsWith(self.location.origin)) {
+                    // pokazujemy okno
                     client.focus();
-                    // bardzo ważne: *wysyłamy event do okna SPA* zamiast navigate
+
+                    // wysyłamy wiadomość do React'a
                     client.postMessage({
                         type: "OPEN_NOTIFICATION_URL",
                         url: urlToOpen
                     });
-                    return;
+
+                    return; // nie otwieramy nowej karty
                 }
             }
 
-            // Jeśli NIE MA otwartego okna → otwórz nowe
+            // 🔥 2) Jeśli aplikacja NIE jest otwarta → otwieramy nową kartę/tab
             return clients.openWindow(urlToOpen);
         })
     );
