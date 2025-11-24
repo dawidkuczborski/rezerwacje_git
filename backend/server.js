@@ -1020,7 +1020,7 @@ app.put(
                 try {
                     console.log("🔔 [PUSH CANCEL] Generuję push przy anulowaniu…");
 
-                    // pobierz pełne dane wizyty (do powiadomienia)
+                    // pełne dane wizyty
                     const details = await pool.query(`
             SELECT a.*, u.name AS client_name, s.name AS service_name
             FROM appointments a
@@ -1031,7 +1031,7 @@ app.put(
 
                     const ap = details.rows[0];
 
-                    // pobierz dodatki
+                    // ➕ dodatki
                     const addonsRes = await pool.query(`
             SELECT sa.name 
             FROM appointment_addons aa
@@ -1039,8 +1039,8 @@ app.put(
             WHERE aa.appointment_id = $1
         `, [id]);
 
-                    const addons = addonsRes.rows.map(a => a.name);
-                    const addonsText = addons.length ? " + " + addons.join(" + ") : "";
+                    const addonNames = addonsRes.rows.map(a => a.name);
+                    const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
                     const formattedDate = new Date(ap.date).toLocaleDateString("pl-PL", {
                         day: "numeric",
@@ -1048,30 +1048,74 @@ app.put(
                         year: "numeric",
                     });
 
-                    const bodyText =
-                        `${formattedDate} • ${ap.start_time}–${ap.end_time} • ` +
-                        `${ap.service_name}${addonsText}`;
-
-                    const subs = await pool.query(
-                        "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                    // 🧑‍🔧 pracownik (uid + nazwa)
+                    const empRes = await pool.query(
+                        `SELECT uid, name FROM employees WHERE id=$1`,
                         [ap.employee_id]
                     );
+                    const employeeUid = empRes.rows[0]?.uid;
+                    const employeeName = empRes.rows[0]?.name || "Pracownik";
 
+                    // 👑 provider
+                    const ownerRes = await pool.query(
+                        `SELECT owner_uid FROM salons WHERE id=$1`,
+                        [ap.salon_id]
+                    );
+                    const providerUid = ownerRes.rows[0]?.owner_uid;
+
+                    // odbiorcy PUSH
+                    const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
+
+                    // pobierz subskrypcje
+                    const subs = await pool.query(
+                        `SELECT uid, subscription 
+             FROM push_subscriptions
+             WHERE uid = ANY($1::text[])`,
+                        [uidsToNotify]
+                    );
+
+                    // wysyłanie
                     for (const row of subs.rows) {
-                        try {
-                            const payloadString = JSON.stringify({
+                        const targetUid = row.uid;
+
+                        // ⭐ PRACOWNIK — normalne powiadomienie
+                        if (targetUid === employeeUid) {
+                            const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
-                                body: bodyText,
+                                body:
+                                    `${formattedDate} • ${ap.start_time}–${ap.end_time}\n` +
+                                    `${ap.service_name}${addonsText}`,
                                 url: `/employee/appointment/${ap.id}`
                             });
 
-                            await webpush.sendNotification(row.subscription, payloadString);
+                            try {
+                                await webpush.sendNotification(row.subscription, payload);
+                            } catch (err) {
+                                console.error("❌ PUSH CANCEL (employee) ERROR:", err.message);
+                            }
+                        }
 
-                            console.log("✔️ PUSH CANCEL wysłany");
-                        } catch (err) {
-                            console.error("❌ PUSH CANCEL ERROR:", err.message);
+                        // ⭐ PROVIDER — powiadomienie z informacją o pracowniku
+                        if (targetUid === providerUid) {
+                            const payload = JSON.stringify({
+                                title: `Anulowano wizytę — ${ap.client_name}`,
+                                body:
+                                    `Pracownik: ${employeeName}\n` +
+                                    `${formattedDate} • ${ap.start_time}–${ap.end_time}\n` +
+                                    `${ap.service_name}${addonsText}`,
+                                url: `/employee/appointment/${ap.id}`
+                            });
+
+                            try {
+                                await webpush.sendNotification(row.subscription, payload);
+                            } catch (err) {
+                                console.error("❌ PUSH CANCEL (provider) ERROR:", err.message);
+                            }
                         }
                     }
+
+                    console.log("✔️ PUSH CANCEL wysłany");
+
                 } catch (err) {
                     console.error("❌ PUSH CANCEL GLOBAL ERROR:", err);
                 }
@@ -1184,41 +1228,40 @@ app.put(
 
 
             /* ------------------------------------------------------
-   🔔 PUSH — zmiana terminu wizyty
+   🔔 PUSH — zmiana terminu wizyty (pracownik + provider)
 ------------------------------------------------------ */
             try {
-                // pobierz aktualne dane wizyty
+                // pobierz aktualne dane po UPDATE
                 const updated = updateRes.rows[0];
 
+                // 🧍 klient
                 const userRes = await pool.query(
                     `SELECT name FROM users WHERE uid = $1`,
                     [appt.client_uid]
                 );
-
                 const clientFullName = userRes.rows[0]?.name || "";
 
-                // format daty poprzedniej
+                // 📅 daty
                 const prevDate = new Date(appt.date).toLocaleDateString("pl-PL", {
                     day: "numeric",
                     month: "long",
                     year: "numeric",
                 });
 
-                // format nowej daty
                 const newDate = new Date(updated.date).toLocaleDateString("pl-PL", {
                     day: "numeric",
                     month: "long",
                     year: "numeric",
                 });
 
-                // pobierz nazwę usługi
+                // 🔧 usługa
                 const svc = await pool.query(
                     `SELECT name FROM services WHERE id = $1`,
                     [appt.service_id]
                 );
                 const serviceName = svc.rows[0]?.name || "";
 
-                // pobierz dodatki
+                // ➕ dodatki
                 const addonsRes = await pool.query(
                     `SELECT sa.name 
          FROM appointment_addons aa
@@ -1230,32 +1273,76 @@ app.put(
                 const addonNames = addonsRes.rows.map(a => a.name);
                 const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
-                // treść powiadomienia
-                const bodyText =
-                    `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
-                    `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`;
-
-                const subs = await pool.query(
-                    "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                // 🧑‍🔧 pracownik (uid + nazwa)
+                const empRes = await pool.query(
+                    `SELECT uid, name FROM employees WHERE id = $1`,
                     [appt.employee_id]
                 );
+                const employeeUid = empRes.rows[0]?.uid;
+                const employeeName = empRes.rows[0]?.name || "Pracownik";
 
+                // 👑 provider
+                const ownerRes = await pool.query(
+                    `SELECT owner_uid FROM salons WHERE id=$1`,
+                    [appt.salon_id]
+                );
+                const providerUid = ownerRes.rows[0]?.owner_uid;
+
+                // odbiorcy
+                const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
+
+                // pobierz subskrypcje po UID
+                const subs = await pool.query(
+                    `SELECT uid, subscription 
+         FROM push_subscriptions
+         WHERE uid = ANY($1::text[])`,
+                    [uidsToNotify]
+                );
+
+                // 🔔 wysyłanie powiadomień
                 for (const row of subs.rows) {
-                    try {
-                        const payloadString = JSON.stringify({
+                    const targetUid = row.uid;
+
+                    // ⭐ pracownik → bez informacji o pracowniku
+                    if (targetUid === employeeUid) {
+                        const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
-                            body: bodyText,
+                            body:
+                                `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
+                                `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`,
                             url: `/employee/appointment/${updated.id}`
                         });
 
-                        await webpush.sendNotification(row.subscription, payloadString);
-                    } catch (err) {
-                        console.error("❌ PUSH ERROR:", err.message);
+                        try {
+                            await webpush.sendNotification(row.subscription, payload);
+                        } catch (err) {
+                            console.error("❌ PUSH UPDATE (employee) ERROR:", err.message);
+                        }
+                    }
+
+                    // ⭐ provider → Z INFORMACJĄ O PRACOWNIKU
+                    if (targetUid === providerUid) {
+                        const payload = JSON.stringify({
+                            title: `Nowy termin — ${clientFullName}`,
+                            body:
+                                `Pracownik: ${employeeName}\n` +
+                                `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
+                                `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`,
+                            url: `/employee/appointment/${updated.id}`
+                        });
+
+                        try {
+                            await webpush.sendNotification(row.subscription, payload);
+                        } catch (err) {
+                            console.error("❌ PUSH UPDATE (provider) ERROR:", err.message);
+                        }
                     }
                 }
+
             } catch (err) {
-                console.error("❌ PUSH ERROR (update):", err);
+                console.error("❌ PUSH UPDATE GLOBAL ERROR:", err);
             }
+
 
 
 
