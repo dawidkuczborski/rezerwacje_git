@@ -427,52 +427,6 @@ function AppLayout() {
         </>
     );
 }
- {
-    const location = useLocation();
-    const navigate = useNavigate();
-
-    // Strony bez menu
-    const hideMenuOn = ["/login", "/register-client", "/register-provider"];
-
-    const shouldHideMenu = hideMenuOn.includes(location.pathname);
-
-    // 🔥 TU NASŁUCHUJEMY NA KLIKNIĘCIA POWIADOMIEŃ, GDY APP JEST OTWARTA
-    useEffect(() => {
-        if (!("serviceWorker" in navigator)) return;
-
-        const handler = (event) => {
-            if (event.data?.type === "OPEN_NOTIFICATION_URL") {
-                const url = event.data.url;
-                if (url) {
-                    navigate(url);
-                }
-            }
-        };
-
-        navigator.serviceWorker.addEventListener("message", handler);
-
-        return () => {
-            navigator.serviceWorker.removeEventListener("message", handler);
-        };
-    }, [navigate]);
-
-    return (
-        <>
-            <ScrollToTop />
-
-            <div className="pb-[70px] transition-colors duration-500">
-                <AppRoutes />
-            </div>
-
-            {!shouldHideMenu && (
-                <>
-                    <BottomNav />
-                    <BottomNavEmployee />
-                </>
-            )}
-        </>
-    );
-}
 
 export default function App() {
     return (
