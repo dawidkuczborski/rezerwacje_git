@@ -6275,12 +6275,13 @@ app.post(
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
-                // ░░░ 1. Pobierz UID pracownika ░░░
-                const empUidRes = await pool.query(
-                    "SELECT uid FROM employees WHERE id=$1",
+                // ░░░ 1. Pobierz UID i nazwę pracownika ░░░
+                const empDataRes = await pool.query(
+                    "SELECT uid, name FROM employees WHERE id=$1",
                     [employee_id]
                 );
-                const employeeUid = empUidRes.rows[0]?.uid;
+                const employeeUid = empDataRes.rows[0]?.uid;
+                const employeeName = empDataRes.rows[0]?.name || "Pracownik";
 
                 // ░░░ 2. Pobierz UID PROVIDERA ░░░
                 const ownerRes = await pool.query(
@@ -6336,14 +6337,15 @@ app.post(
 
                 // ░░░ 8. Treść powiadomienia ░░░
                 const bodyText =
-                    `${formattedDate} • ${start_time}–${end_time} • ` +
+                    `Pracownik: ${employeeName}\n` +
+                    `${formattedDate} • ${start_time}–${end_time}\n` +
                     `${serviceName}${addonsText}`;
 
                 // ░░░ 9. Wysyłanie powiadomień ░░░
                 for (const row of subs.rows) {
                     try {
                         const payloadString = JSON.stringify({
-                            title: `Nowa rezerwacja - ${clientFullName}`,
+                            title: `Nowa wizyta – ${clientFullName}`,
                             body: bodyText,
                             url: `/employee/appointment/${appointmentId}`,
                         });
