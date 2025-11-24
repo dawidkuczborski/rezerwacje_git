@@ -2,24 +2,17 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { Phone, History } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 export default function NotificationAppointmentModal({ open, appointmentId }) {
     const [appointment, setAppointment] = useState(null);
     const navigate = useNavigate();
-
-    // 🔥 tu pobieramy ID powiadomienia z URL
-    const [params] = useSearchParams();
-    const notificationId = params.get("notification_id");
 
     const backendBase = import.meta.env.VITE_API_URL;
     const authHeaders = () => ({
         headers: { Authorization: `Bearer ${localStorage.getItem("authToken")}` }
     });
 
-    // ============================
-    // 🔥 Pobieranie danych wizyty
-    // ============================
     useEffect(() => {
         if (!open || !appointmentId) return;
 
@@ -38,32 +31,11 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         load();
     }, [open, appointmentId]);
 
-    // ============================
-    // 🔥 oznacz powiadomienie po ZAMKNIĘCIU modala
-    // ============================
-    const markNotificationRead = async () => {
-        if (!notificationId) return;
-
-        try {
-            await axios.post(
-                backendBase + "/notifications/mark-read",
-                { id: notificationId },
-                authHeaders()
-            );
-        } catch (err) {
-            console.error("mark-read error", err);
-        }
-    };
-
-    // ============================
-    // 🔥 Zamknięcie modala
-    // ============================
-    const closeToCalendar = async () => {
-        await markNotificationRead();
-        navigate(-1); // wróć do poprzedniej strony
-    };
-
     if (!open) return null;
+
+    const closeToCalendar = () => {
+        navigate("/employee/calendar", { replace: true });
+    };
 
     const formatDatePL = (d) => {
         try {
@@ -73,7 +45,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         }
     };
 
-    // 🟣 Czy zmieniono termin?
+    // 🟣 ZMIANA TERMINU tylko jeśli status = booked
     const isChanged =
         appointment?.status === "booked" &&
         (
@@ -82,7 +54,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
             appointment?.previous_end_time
         );
 
-    // 🟩 Status PL
+    // 🟩 STATUSY PL
     const translateStatus = () => {
         const st = appointment?.status;
 
@@ -92,7 +64,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
         return "Zarezerwowana";
     };
 
-    // 🟦 Kolor statusu
+    // 🟦 KOLORY STATUSÓW
     const statusBadge = () => {
         const st = appointment?.status;
 
@@ -120,15 +92,16 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                     initial={{ y: 60 }}
                     animate={{ y: 0 }}
                     exit={{ y: 60 }}
-                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col"
+                    className="w-full h-full bg-white dark:bg-[#1a1a1a] overflow-y-auto flex flex-col" // 🔥 usunięte rounded
                 >
-                    {/* HEADER */}
+                    {/* HEADER (zostaje zaokrąglony) */}
                     <div className="bg-[#e57b2c] dark:bg-[#b86422] px-6 pt-[calc(env(safe-area-inset-top)+22px)] pb-8 text-white flex justify-center items-center rounded-t-3xl">
                         <h2 className="text-[20px] font-semibold">Szczegóły wizyty</h2>
                     </div>
 
                     {/* BODY */}
                     <div className="px-6 py-8 space-y-8 flex-1">
+
                         {!appointment ? (
                             <div className="text-center text-gray-400">Ładowanie…</div>
                         ) : (
@@ -201,7 +174,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                                     </div>
                                 </div>
 
-                                {/* HISTORIA ZMIAN */}
+                                {/* HISTORIA ZMIAN — tylko gdy booked i zmieniona */}
                                 {appointment.status === "booked" && isChanged && (
                                     <div className="pt-4">
                                         <div className="flex items-center gap-2 text-gray-500 text-sm mb-2">
@@ -209,6 +182,7 @@ export default function NotificationAppointmentModal({ open, appointmentId }) {
                                         </div>
 
                                         <div className="space-y-2 text-sm">
+
                                             {appointment.previous_date && (
                                                 <div className="flex justify-between">
                                                     <span>Poprzednia data</span>
