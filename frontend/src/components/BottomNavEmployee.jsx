@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
     CalendarDays,
@@ -28,14 +28,27 @@ export default function BottomNavEmployee() {
     const [openVacation, setOpenVacation] = useState(false);
     const [openTimeOff, setOpenTimeOff] = useState(false);
 
-    // 🔔 PRZYKŁADOWE POWIADOMIENIA (na razie statyczne)
-    const [notifications, setNotifications] = useState([
-        { id: 1, text: "Nowa rezerwacja od Jan Kowalski" },
-        { id: 2, text: "Klient odwołał wizytę" },
-        { id: 3, text: "Jutro masz 5 wizyt" },
-        { id: 4, text: "Ważna aktualizacja systemu" },
-        { id: 5, text: "Nowa wiadomość w czacie" },
-    ]);
+    // 🔔 PUSTA LISTA — będzie wypełniana poprzez WebPush
+    const [notifications, setNotifications] = useState([]);
+
+    // 🔥 KROK 3 — odbiór powiadomień z AppLayout (NEW_NOTIFICATION)
+    useEffect(() => {
+        const handler = (e) => {
+            const n = e.detail; // { title, body, url }
+
+            setNotifications((prev) => [
+                {
+                    id: Date.now(),
+                    text: `${n.title}: ${n.body}`,
+                    url: n.url || "/",
+                },
+                ...prev,
+            ]);
+        };
+
+        window.addEventListener("app-notification", handler);
+        return () => window.removeEventListener("app-notification", handler);
+    }, []);
 
     if (!location.pathname.startsWith("/employee")) return null;
 
@@ -46,12 +59,12 @@ export default function BottomNavEmployee() {
 
     return (
         <>
-            {/* 🔔 DZWONEK NAD MENU (po prawej stronie) */}
+            {/* 🔔 DZWONEK NAD MENU */}
             <div className="fixed bottom-[95px] right-6 z-[9999]">
                 <button
                     className="relative p-3 bg-white dark:bg-neutral-900 rounded-full shadow-lg border"
                     onClick={async () => {
-                        await subscribeToPush(); // 👉 tu rejestrujemy WebPush
+                        await subscribeToPush(); // rejestracja push
                         setOpenNotifications(true);
                     }}
                 >
@@ -71,7 +84,7 @@ export default function BottomNavEmployee() {
                 </button>
             </div>
 
-            {/* 🔔 TŁO PANELU POWIADOMIEŃ */}
+            {/* TŁO PANELU */}
             {openNotifications && (
                 <div
                     className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9998]"
@@ -79,7 +92,7 @@ export default function BottomNavEmployee() {
                 />
             )}
 
-            {/* 🔔 PANEL POWIADOMIEŃ */}
+            {/* PANEL POWIADOMIEŃ */}
             {openNotifications && (
                 <div
                     className="
@@ -105,6 +118,9 @@ export default function BottomNavEmployee() {
                                     p-3 bg-gray-100 dark:bg-gray-800 rounded-xl 
                                     shadow text-sm cursor-grab active:scale-[0.97]
                                 "
+                                onClick={() => {
+                                    if (n.url) window.location.href = n.url;
+                                }}
                             >
                                 {n.text}
                             </div>
@@ -138,31 +154,26 @@ export default function BottomNavEmployee() {
             >
                 {!openFabMenu ? (
                     <>
-                        {/* 1. KALENDARZ */}
                         <NavLink
                             to="/employee/calendar"
                             className={({ isActive }) =>
                                 `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`
-                            }
+                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
                         >
                             <CalendarDays size={22} />
                             <span className="text-[11px] mt-1">Kalendarz</span>
                         </NavLink>
 
-                        {/* 2. REZERWACJE */}
                         <NavLink
                             to="/employee/reservations"
                             className={({ isActive }) =>
                                 `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`
-                            }
+                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
                         >
                             <List size={22} />
                             <span className="text-[11px] mt-1">Rezerwacje</span>
                         </NavLink>
 
-                        {/* 3. FAB */}
                         <div className="flex-1 flex items-center justify-center">
                             <button
                                 onClick={() => setOpenFabMenu((v) => !v)}
@@ -176,25 +187,21 @@ export default function BottomNavEmployee() {
                             </button>
                         </div>
 
-                        {/* 4. KLIENCI */}
                         <NavLink
                             to="/employee/clients"
                             className={({ isActive }) =>
                                 `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`
-                            }
+                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
                         >
                             <Users size={22} />
                             <span className="text-[11px] mt-1">Klienci</span>
                         </NavLink>
 
-                        {/* 5. USTAWIENIA */}
                         <NavLink
                             to="/employee/settings"
                             className={({ isActive }) =>
                                 `flex flex-col items-center flex-1 text-xs
-                                ${isActive ? "text-orange-600" : "text-gray-500"}`
-                            }
+                                ${isActive ? "text-orange-600" : "text-gray-500"}`}
                         >
                             <Settings size={22} />
                             <span className="text-[11px] mt-1">Ustawienia</span>
@@ -202,7 +209,6 @@ export default function BottomNavEmployee() {
                     </>
                 ) : (
                     <>
-                        {/* TRYB FAB */}
                         <button
                             onClick={() => {
                                 setOpenAppointment(true);

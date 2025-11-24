@@ -390,16 +390,34 @@ function AppLayout() {
     const shouldHideMenu = hideMenuOn.includes(location.pathname);
 
     // 🔥 TU NASŁUCHUJEMY NA KLIKNIĘCIA POWIADOMIEŃ, GDY APP JEST OTWARTA
+    // 🔥 ODBIÓR WIADOMOŚCI z SERVICE WORKERA (kliknięcia + nowe powiadomienia)
     useEffect(() => {
         if (!("serviceWorker" in navigator)) return;
 
         const handler = (event) => {
-            // 🔥 poprawiona nazwa eventu — taka sama jak w SW
+
+            /* ---------------------------------------------
+               1️⃣ KLIKNIĘCIE POWIADOMIENIA
+            --------------------------------------------- */
             if (event.data?.type === "OPEN_NOTIFICATION_URL") {
                 const url = event.data.url;
                 if (url) {
-                    navigate(url);    // 🔥 to automatycznie otwiera modal przez route wrapper
+                    navigate(url);
                 }
+            }
+
+            /* ---------------------------------------------
+               2️⃣ NOWE POWIADOMIENIE, gdy app jest OTWARTA
+            --------------------------------------------- */
+            if (event.data?.type === "NEW_NOTIFICATION") {
+                const notification = event.data.payload;
+
+                // 🔥 Wyślij globalny event, który odbierze dzwonek (BottomNavEmployee)
+                window.dispatchEvent(
+                    new CustomEvent("app-notification", {
+                        detail: notification
+                    })
+                );
             }
         };
 
@@ -409,6 +427,7 @@ function AppLayout() {
             navigator.serviceWorker.removeEventListener("message", handler);
         };
     }, [navigate]);
+
 
     return (
         <>

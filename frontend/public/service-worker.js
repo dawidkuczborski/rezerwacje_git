@@ -1,6 +1,9 @@
 ﻿// =======================================
 // 🔔 ODBIÓR PUSH
 // =======================================
+// =======================================
+// 🔔 ODBIÓR PUSH
+// =======================================
 self.addEventListener("push", (event) => {
     console.log("[SW] Push odebrany:", event.data?.text());
 
@@ -22,8 +25,22 @@ self.addEventListener("push", (event) => {
         }
     };
 
+    // 🔔 1. Pokaż natywne powiadomienie
     event.waitUntil(self.registration.showNotification(title, options));
+
+    // 🔥 2. WYŚLIJ DO APLIKACJI REACT, JEŚLI JEST OTWARTA
+    event.waitUntil(
+        self.clients.matchAll({ includeUncontrolled: true }).then((clientList) => {
+            for (const client of clientList) {
+                client.postMessage({
+                    type: "NEW_NOTIFICATION",
+                    payload: data
+                });
+            }
+        })
+    );
 });
+
 
 
 // =======================================
