@@ -6032,8 +6032,8 @@ app.post(
             }
 
             /* ------------------------------------------------------
-    🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
- ------------------------------------------------------ */
+   🔔 WEB PUSH – powiadom pracownika o nowej wizycie
+------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
@@ -6067,27 +6067,28 @@ app.post(
                 const addonsText =
                     addonNames.length > 0 ? " + " + addonNames.join(" + ") : "";
 
-                // 🔹 Format daty PL
+                // 🔹 Format daty PL (bez dnia tygodnia)
                 const dt = new Date(date + "T" + start_time);
                 const formattedDate = dt.toLocaleDateString("pl-PL", {
-                    weekday: "long",
                     day: "numeric",
                     month: "long",
                     year: "numeric",
                 });
 
-                // 🔹 Imię i nazwisko klienta
+                // 🔹 Imię + nazwisko klienta
                 const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
 
-                // 🔹 Pełny tekst powiadomienia
-                const bodyText = `${formattedDate}, godz. ${start_time}–${end_time}\n${clientFullName} — ${serviceName}${addonsText}`;
+                // 🔹 Tekst powiadomienia
+                const bodyText =
+                    `${formattedDate} • ${start_time}–${end_time} • ` +
+                    `${serviceName}${addonsText}`;
 
                 for (const row of subs.rows) {
                     try {
                         const subscription = row.subscription;
 
                         const payloadString = JSON.stringify({
-                            title: "Nowa rezerwacja!",
+                            title: `Nowa wizyta — ${clientFullName}`,
                             body: bodyText,
                             url: `/employee/appointment/${appointmentId}`,
                         });
