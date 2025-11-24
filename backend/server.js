@@ -6088,7 +6088,7 @@ app.post(
                         const subscription = row.subscription;
 
                         const payloadString = JSON.stringify({
-                            title: `Nowa wizyta — ${clientFullName}`,
+                            title: `Nowa rezerwacja — ${clientFullName}`,
                             body: bodyText,
                             url: `/employee/appointment/${appointmentId}`,
                         });
