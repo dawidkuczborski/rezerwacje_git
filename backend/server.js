@@ -6032,8 +6032,8 @@ app.post(
             }
 
             /* ------------------------------------------------------
-               🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
-            ------------------------------------------------------ */
+   🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
+------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
@@ -6045,42 +6045,59 @@ app.post(
 
                 console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
-                if (subs.rows.length === 0) {
-                    console.log("ℹ️ Brak subskrypcji push dla pracownika.");
-                }
+                // pobierz nazwę usługi i dodatków
+                const svcRes = await pool.query(
+                    `SELECT name FROM services WHERE id = $1`,
+                    [service_id]
+                );
+                const serviceName = svcRes.rows[0]?.name || "";
+
+                const addonsRes = await pool.query(
+                    `SELECT name FROM addons WHERE id = ANY($1)`,
+                    [addons]
+                );
+                const addonsList = addonsRes.rows.map(a => a.name);
+
+                const addonsText = addonsList.length
+                    ? " + " + addonsList.join(" + ")
+                    : "";
+
+                // formatowanie daty PL
+                const formattedDate = new Date(date).toLocaleDateString("pl-PL", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                });
+
+                const timeRange = `${start_time} - ${end_time}`;
+                const clientFullName = `${first_name} ${last_name || ""}`.trim();
 
                 for (const row of subs.rows) {
                     try {
                         console.log("🔔 [PUSH] Raw subscription:", row.subscription);
+                        const parsed = row.subscription;
 
-                        const parsed = row.subscription; // już jest obiektem
-
-                        console.log("🔔 [PUSH] Parsed subscription:", parsed);
-
-                        // ⚠️ Safari i FCM akceptują TYLKO string – nic innego
+                        // 🔥 TWÓJ FORMAT WIADOMOŚCI
                         const payloadString = JSON.stringify({
-                            title: `${"Nowa rezerwacja"}`,
-                            body: `${"Nowa wizyta: " + date + " o " + start_time}`,
-                            url: "/employee/calendar"
+                            title: "Nowa rezerwacja!",
+                            body: `${formattedDate} · godz. ${timeRange}\n${clientFullName} — ${serviceName}${addonsText}`,
+                            url: `/employee/calendar?open=${appointmentId}`
                         });
 
                         console.log("👉 PAYLOAD STRING:", payloadString);
 
-                        // ✔️ JEDYNE poprawne wywołanie sendNotification
                         await webpush.sendNotification(parsed, payloadString);
-
                         console.log("✔️ [PUSH] Wysłano poprawnie");
 
                     } catch (err) {
                         console.error("❌ [PUSH ERROR] msg:", err.message);
                         console.error("❌ status:", err.statusCode);
 
-                        // usuń martwe subskrypcje
                         if (err.statusCode === 410 || err.statusCode === 404) {
                             console.log("🗑 Usuwam martwą subskrypcję");
                             await pool.query(
                                 "DELETE FROM push_subscriptions WHERE subscription = $1",
-                                [row.subscription]
+                                [JSON.stringify(row.subscription)]
                             );
                         }
                     }
@@ -6088,6 +6105,7 @@ app.post(
             } catch (err) {
                 console.error("❌ GLOBAL PUSH ERROR:", err);
             }
+
 
 
             res.json({
