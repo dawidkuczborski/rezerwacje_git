@@ -1309,7 +1309,7 @@ app.put(
                             body:
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
                                 `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${updated.id}`   // ✔ NOWA STRONA
+                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
                         });
 
                         try {
@@ -1327,7 +1327,7 @@ app.put(
                                 `Pracownik: ${employeeName}\n` +
                                 `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
                                 `nowy: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
-                            url: `/notification/appointment/${updated.id}`   // ✔ NOWA STRONA
+                            url: `/notification/appointment/${updated.id}`   // 🔥 NOWY MODAL
                         });
 
                         try {
@@ -1341,7 +1341,6 @@ app.put(
             } catch (err) {
                 console.error("❌ PUSH UPDATE GLOBAL ERROR:", err);
             }
-
 
 
 
