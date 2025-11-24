@@ -874,11 +874,82 @@ app.get(
     })
 );
 
+
 // ✅ Anulowanie wizyty
 app.put("/api/appointments/:id/cancel", asyncHandler(async (req, res) => {
-    await pool.query(`UPDATE appointments SET status = 'cancelled' WHERE id = $1`, [req.params.id]);
+    const id = req.params.id;
+
+    // pobierz wizytę
+    const apptRes = await pool.query(`
+        SELECT a.*, 
+               u.name AS client_name,
+               s.name AS service_name
+        FROM appointments a
+        JOIN users u ON u.uid = a.client_uid
+        JOIN services s ON s.id = a.service_id
+        WHERE a.id = $1
+    `, [id]);
+
+    if (apptRes.rows.length === 0)
+        return res.status(404).json({ error: "Nie znaleziono wizyty" });
+
+    const appt = apptRes.rows[0];
+
+    // pobierz dodatki
+    const addonsRes = await pool.query(
+        `SELECT sa.name 
+         FROM appointment_addons aa
+         JOIN service_addons sa ON sa.id = aa.addon_id
+         WHERE aa.appointment_id = $1`,
+        [id]
+    );
+
+    const addonNames = addonsRes.rows.map(a => a.name);
+    const addonsText = addonNames.length > 0 ? " + " + addonNames.join(" + ") : "";
+
+    // format daty
+    const formattedDate = new Date(appt.date).toLocaleDateString("pl-PL", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+    });
+
+    const clientFullName = appt.client_name;
+
+    // 🔔 wygeneruj push
+    const bodyText =
+        `${formattedDate} • ${appt.start_time}–${appt.end_time} • ` +
+        `${appt.service_name}${addonsText}`;
+
+    // subskrypcje pracownika
+    const subs = await pool.query(
+        "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+        [appt.employee_id]
+    );
+
+    for (const row of subs.rows) {
+        try {
+            const payloadString = JSON.stringify({
+                title: `Anulowano wizytę — ${clientFullName}`,
+                body: bodyText,
+                url: `/employee/appointment/${appt.id}`
+            });
+
+            await webpush.sendNotification(row.subscription, payloadString);
+        } catch (err) {
+            console.error("❌ PUSH ERROR:", err.message);
+        }
+    }
+
+    // anuluj wizytę
+    await pool.query(
+        `UPDATE appointments SET status = 'cancelled' WHERE id = $1`,
+        [id]
+    );
+
     res.json({ message: "Appointment cancelled" });
 }));
+
 // ✅ Aktualizacja / zmiana terminu wizyty — z zachowaniem dodatków i historią
 app.put(
     "/api/appointments/:id",
@@ -1021,6 +1092,82 @@ app.put(
             });
 
             console.log("📡 Wysłano calendar_updated (UPDATE):", updateRes.rows[0].id);
+
+
+            /* ------------------------------------------------------
+   🔔 PUSH — zmiana terminu wizyty
+------------------------------------------------------ */
+            try {
+                // pobierz aktualne dane wizyty
+                const updated = updateRes.rows[0];
+
+                const userRes = await pool.query(
+                    `SELECT name FROM users WHERE uid = $1`,
+                    [appt.client_uid]
+                );
+
+                const clientFullName = userRes.rows[0]?.name || "";
+
+                // format daty poprzedniej
+                const prevDate = new Date(appt.date).toLocaleDateString("pl-PL", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                });
+
+                // format nowej daty
+                const newDate = new Date(updated.date).toLocaleDateString("pl-PL", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                });
+
+                // pobierz nazwę usługi
+                const svc = await pool.query(
+                    `SELECT name FROM services WHERE id = $1`,
+                    [appt.service_id]
+                );
+                const serviceName = svc.rows[0]?.name || "";
+
+                // pobierz dodatki
+                const addonsRes = await pool.query(
+                    `SELECT sa.name 
+         FROM appointment_addons aa
+         JOIN service_addons sa ON sa.id = aa.addon_id
+         WHERE aa.appointment_id = $1`,
+                    [id]
+                );
+
+                const addonNames = addonsRes.rows.map(a => a.name);
+                const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
+
+                // treść powiadomienia
+                const bodyText =
+                    `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
+                    `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`;
+
+                const subs = await pool.query(
+                    "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                    [appt.employee_id]
+                );
+
+                for (const row of subs.rows) {
+                    try {
+                        const payloadString = JSON.stringify({
+                            title: `Nowy termin — ${clientFullName}`,
+                            body: bodyText,
+                            url: `/employee/appointment/${updated.id}`
+                        });
+
+                        await webpush.sendNotification(row.subscription, payloadString);
+                    } catch (err) {
+                        console.error("❌ PUSH ERROR:", err.message);
+                    }
+                }
+            } catch (err) {
+                console.error("❌ PUSH ERROR (update):", err);
+            }
+
 
 
             res.json({
@@ -6088,7 +6235,7 @@ app.post(
                         const subscription = row.subscription;
 
                         const payloadString = JSON.stringify({
-                            title: `Nowa rezerwacja — ${clientFullName}`,
+                            title: `Nowa rezerwacja - ${clientFullName}`,
                             body: bodyText,
                             url: `/employee/appointment/${appointmentId}`,
                         });
