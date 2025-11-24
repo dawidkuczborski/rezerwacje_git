@@ -6290,12 +6290,12 @@ app.post(
                 );
                 const providerUid = ownerRes.rows[0]?.owner_uid;
 
-                // Provider może mieć takie samo UID jak pracownik → usuwamy duplikaty
+                // odbiorcy
                 const uidsToNotify = Array.from(new Set([employeeUid, providerUid].filter(Boolean)));
 
                 // ░░░ 3. Pobierz subskrypcje pracownika i providera ░░░
                 const subs = await pool.query(
-                    `SELECT subscription 
+                    `SELECT uid, subscription 
          FROM push_subscriptions
          WHERE uid = ANY($1::text[])`,
                     [uidsToNotify]
@@ -6303,14 +6303,14 @@ app.post(
 
                 console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
-                // ░░░ 4. Nazwa usługi ░░░
+                // ░░░ 4. Nazwa usługi
                 const serviceRow = await pool.query(
                     `SELECT name FROM services WHERE id=$1`,
                     [service_id]
                 );
                 const serviceName = serviceRow.rows[0]?.name || "";
 
-                // ░░░ 5. Dodatki ░░░
+                // ░░░ 5. Dodatki
                 const addonIds = Array.isArray(addons) ? addons.map(Number) : [];
                 let addonNames = [];
 
@@ -6324,7 +6324,7 @@ app.post(
 
                 const addonsText = addonNames.length ? " + " + addonNames.join(" + ") : "";
 
-                // ░░░ 6. Format daty ░░░
+                // ░░░ 6. Format daty
                 const dt = new Date(date + "T" + start_time);
                 const formattedDate = dt.toLocaleDateString("pl-PL", {
                     day: "numeric",
@@ -6332,35 +6332,43 @@ app.post(
                     year: "numeric",
                 });
 
-                // ░░░ 7. Imię + nazwisko klienta ░░░
+                // ░░░ 7. Imię + nazwisko klienta
                 const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
 
-                // ░░░ 8. Treść powiadomienia ░░░
-                const bodyText =
-                    `Pracownik: ${employeeName}\n` +
-                    `${formattedDate} • ${start_time}–${end_time}\n` +
-                    `${serviceName}${addonsText}`;
-
-                // ░░░ 9. Wysyłanie powiadomień ░░░
+                // ░░░ 8. Wysyłanie powiadomień ░░░
                 for (const row of subs.rows) {
-                    try {
-                        const payloadString = JSON.stringify({
+                    const targetUid = row.uid;
+
+                    // ⭐  Wersja dla PRACOWNIKA (bez informacji o pracowniku)
+                    if (targetUid === employeeUid) {
+                        const payload = JSON.stringify({
                             title: `Nowa wizyta – ${clientFullName}`,
-                            body: bodyText,
+                            body: `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
                             url: `/employee/appointment/${appointmentId}`,
                         });
 
-                        await webpush.sendNotification(row.subscription, payloadString);
-                        console.log("✔️ Push wysłany");
-                    } catch (err) {
-                        console.error("❌ PUSH ERROR:", err.message);
+                        try {
+                            await webpush.sendNotification(row.subscription, payload);
+                        } catch (err) {
+                            console.error("❌ PUSH EMPLOYEE ERROR:", err.message);
+                        }
+                    }
 
-                        if (err.statusCode === 410 || err.statusCode === 404) {
-                            console.log("🗑 Usuwam martwą subskrypcję");
-                            await pool.query(
-                                "DELETE FROM push_subscriptions WHERE subscription = $1",
-                                [row.subscription]
-                            );
+                    // ⭐  Wersja dla PROVIDERA (z informacją o pracowniku)
+                    if (targetUid === providerUid) {
+                        const payload = JSON.stringify({
+                            title: `Nowa wizyta – ${clientFullName}`,
+                            body:
+                                `Pracownik: ${employeeName}\n` +
+                                `${formattedDate} • ${start_time}–${end_time}\n` +
+                                `${serviceName}${addonsText}`,
+                            url: `/employee/appointment/${appointmentId}`,
+                        });
+
+                        try {
+                            await webpush.sendNotification(row.subscription, payload);
+                        } catch (err) {
+                            console.error("❌ PUSH PROVIDER ERROR:", err.message);
                         }
                     }
                 }
