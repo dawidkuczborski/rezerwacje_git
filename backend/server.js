@@ -748,6 +748,66 @@ app.post(
 );
 // -------------------- WEB PUSH SEND --------------------
 app.post(
+    "/push/unsubscribe",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        const empRes = await pool.query(
+            "SELECT id FROM employees WHERE uid=$1",
+            [uid]
+        );
+
+        if (empRes.rows.length === 0) {
+            return res.status(403).json({ error: "Tylko pracownicy mogą zarządzać powiadomieniami" });
+        }
+
+        const employeeId = empRes.rows[0].id;
+
+        await pool.query(
+            "DELETE FROM push_subscriptions WHERE employee_id=$1",
+            [employeeId]
+        );
+
+        res.json({ success: true });
+    })
+);
+// -------------------- WEB PUSH STATUS --------------------
+app.get(
+    "/push/status",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const uid = req.user?.uid;
+
+        if (!uid) return res.status(401).json({ error: "Brak autoryzacji" });
+
+        // znajdź pracownika
+        const empRes = await pool.query(
+            "SELECT id FROM employees WHERE uid=$1",
+            [uid]
+        );
+
+        if (empRes.rows.length === 0) {
+            return res.status(403).json({
+                error: "Tylko pracownik może mieć powiadomienia PUSH"
+            });
+        }
+
+        const employeeId = empRes.rows[0].id;
+
+        // sprawdź czy ma subskrypcję
+        const subRes = await pool.query(
+            "SELECT id FROM push_subscriptions WHERE employee_id=$1 LIMIT 1",
+            [employeeId]
+        );
+
+        res.json({ enabled: subRes.rows.length > 0 });
+    })
+);
+
+
+app.post(
     "/push/send",
     asyncHandler(async (req, res) => {
         const { employee_id, title, body, url } = req.body;
