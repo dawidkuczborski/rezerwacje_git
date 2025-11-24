@@ -41,9 +41,15 @@ self.addEventListener("notificationclick", (event) => {
                 for (const client of clientList) {
                     // Jeśli PWA/karta jest już otwarta:
                     if (client.url.startsWith(self.location.origin)) {
-                        // 🔥 To jest klucz – navigate zamiast postMessage
+
+                        // 🔥 Wysyłamy POST MESSAGE do aplikacji
                         client.focus();
-                        return client.navigate(urlToOpen);
+                        client.postMessage({
+                            type: "OPEN_NOTIFICATION",
+                            url: urlToOpen
+                        });
+
+                        return;
                     }
                 }
 
