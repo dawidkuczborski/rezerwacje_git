@@ -39,21 +39,18 @@ self.addEventListener("notificationclick", (event) => {
             .then((clientList) => {
 
                 for (const client of clientList) {
-                    // Jeśli PWA/karta jest już otwarta:
-                    if (client.url.startsWith(self.location.origin)) {
-
-                        // 🔥 Wysyłamy POST MESSAGE do aplikacji
+                    // 🔥 DZIAŁA W KAŻDYM PWA I KAŻDEJ PRZEGLĄDARCE
+                    if (client.visibilityState === "visible") {
                         client.focus();
                         client.postMessage({
-                            type: "OPEN_NOTIFICATION",
+                            type: "OPEN_NOTIFICATION_URL",
                             url: urlToOpen
                         });
-
                         return;
                     }
                 }
 
-                // Jeśli nie ma otwartego okna → nowa karta
+                // Jeśli nie ma aktywnych okien
                 return clients.openWindow(urlToOpen);
             })
     );
