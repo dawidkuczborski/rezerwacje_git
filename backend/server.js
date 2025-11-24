@@ -990,6 +990,71 @@ app.put(
                 console.log("📡 Wysłano calendar_updated (DELETE):", result.rows[0].id);
             }
 
+
+            // 🔥 POWIADOMIENIE PUSH – anulowanie wizyty
+            if (status === "cancelled") {
+                try {
+                    console.log("🔔 [PUSH CANCEL] Generuję push przy anulowaniu…");
+
+                    // pobierz pełne dane wizyty (do powiadomienia)
+                    const details = await pool.query(`
+            SELECT a.*, u.name AS client_name, s.name AS service_name
+            FROM appointments a
+            JOIN users u ON u.uid = a.client_uid
+            JOIN services s ON s.id = a.service_id
+            WHERE a.id = $1
+        `, [id]);
+
+                    const ap = details.rows[0];
+
+                    // pobierz dodatki
+                    const addonsRes = await pool.query(`
+            SELECT sa.name 
+            FROM appointment_addons aa
+            JOIN service_addons sa ON sa.id = aa.addon_id
+            WHERE aa.appointment_id = $1
+        `, [id]);
+
+                    const addons = addonsRes.rows.map(a => a.name);
+                    const addonsText = addons.length ? " + " + addons.join(" + ") : "";
+
+                    const formattedDate = new Date(ap.date).toLocaleDateString("pl-PL", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                    });
+
+                    const bodyText =
+                        `${formattedDate} • ${ap.start_time}–${ap.end_time} • ` +
+                        `${ap.service_name}${addonsText}`;
+
+                    const subs = await pool.query(
+                        "SELECT subscription FROM push_subscriptions WHERE employee_id = $1",
+                        [ap.employee_id]
+                    );
+
+                    for (const row of subs.rows) {
+                        try {
+                            const payloadString = JSON.stringify({
+                                title: `Anulowano wizytę — ${ap.client_name}`,
+                                body: bodyText,
+                                url: `/employee/appointment/${ap.id}`
+                            });
+
+                            await webpush.sendNotification(row.subscription, payloadString);
+
+                            console.log("✔️ PUSH CANCEL wysłany");
+                        } catch (err) {
+                            console.error("❌ PUSH CANCEL ERROR:", err.message);
+                        }
+                    }
+                } catch (err) {
+                    console.error("❌ PUSH CANCEL GLOBAL ERROR:", err);
+                }
+            }
+
+
+
             return res.json({
                 message: "✅ Status wizyty zaktualizowany",
                 appointment: result.rows[0],
