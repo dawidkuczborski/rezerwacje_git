@@ -6032,8 +6032,8 @@ app.post(
             }
 
             /* ------------------------------------------------------
-   🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
------------------------------------------------------- */
+    🔔 WEB PUSH – powiadom pracownika o nowej rezerwacji
+ ------------------------------------------------------ */
             try {
                 console.log("🔔 [PUSH] START (client booking) for employee_id:", employee_id);
 
@@ -6045,62 +6045,65 @@ app.post(
 
                 console.log("🔔 [PUSH] Subscriptions found:", subs.rows.length);
 
-                // pobierz nazwę usługi i dodatków
-                const svcRes = await pool.query(
-                    `SELECT name FROM services WHERE id = $1`,
+                // 🔹 Pobierz nazwę usługi
+                const serviceRow = await pool.query(
+                    `SELECT name FROM services WHERE id=$1`,
                     [service_id]
                 );
-                const serviceName = svcRes.rows[0]?.name || "";
+                const serviceName = serviceRow.rows[0]?.name || "";
 
-                const addonsRes = await pool.query(
-                    `SELECT name 
-                 FROM service_addons 
-                 WHERE id = ANY($1::int[])`,
-                                [addonIds]
-                            );
+                // 🔹 Pobierz nazwy dodatków
+                const addonIds = Array.isArray(addons) ? addons.map(Number) : [];
+                let addonNames = [];
 
-                const addonsList = addonsRes.rows.map(a => a.name);
+                if (addonIds.length > 0) {
+                    const addRes = await pool.query(
+                        `SELECT name FROM service_addons WHERE id = ANY($1::int[])`,
+                        [addonIds]
+                    );
+                    addonNames = addRes.rows.map(a => a.name);
+                }
 
-                const addonsText = addonsList.length
-                    ? " + " + addonsList.join(" + ")
-                    : "";
+                const addonsText =
+                    addonNames.length > 0 ? " + " + addonNames.join(" + ") : "";
 
-                // formatowanie daty PL
-                const formattedDate = new Date(date).toLocaleDateString("pl-PL", {
+                // 🔹 Format daty PL
+                const dt = new Date(date + "T" + start_time);
+                const formattedDate = dt.toLocaleDateString("pl-PL", {
+                    weekday: "long",
                     day: "numeric",
                     month: "long",
-                    year: "numeric"
+                    year: "numeric",
                 });
 
-                const timeRange = `${start_time} - ${end_time}`;
-                const clientFullName = `${first_name} ${last_name || ""}`.trim();
+                // 🔹 Imię i nazwisko klienta
+                const clientFullName = `${first_name}${last_name ? " " + last_name : ""}`;
+
+                // 🔹 Pełny tekst powiadomienia
+                const bodyText = `${formattedDate}, godz. ${start_time}–${end_time}\n${clientFullName} — ${serviceName}${addonsText}`;
 
                 for (const row of subs.rows) {
                     try {
-                        console.log("🔔 [PUSH] Raw subscription:", row.subscription);
-                        const parsed = row.subscription;
+                        const subscription = row.subscription;
 
-                        // 🔥 TWÓJ FORMAT WIADOMOŚCI
                         const payloadString = JSON.stringify({
                             title: "Nowa rezerwacja!",
-                            body: `${formattedDate} · godz. ${timeRange}\n${clientFullName} — ${serviceName}${addonsText}`,
-                            url: `/employee/calendar?open=${appointmentId}`
+                            body: bodyText,
+                            url: `/employee/appointment/${appointmentId}`,
                         });
 
-                        console.log("👉 PAYLOAD STRING:", payloadString);
+                        await webpush.sendNotification(subscription, payloadString);
 
-                        await webpush.sendNotification(parsed, payloadString);
-                        console.log("✔️ [PUSH] Wysłano poprawnie");
+                        console.log("✔️ Push wysłany");
 
                     } catch (err) {
-                        console.error("❌ [PUSH ERROR] msg:", err.message);
-                        console.error("❌ status:", err.statusCode);
+                        console.error("❌ PUSH ERROR:", err.message);
 
                         if (err.statusCode === 410 || err.statusCode === 404) {
                             console.log("🗑 Usuwam martwą subskrypcję");
                             await pool.query(
                                 "DELETE FROM push_subscriptions WHERE subscription = $1",
-                                [JSON.stringify(row.subscription)]
+                                [row.subscription]
                             );
                         }
                     }
@@ -6108,6 +6111,7 @@ app.post(
             } catch (err) {
                 console.error("❌ GLOBAL PUSH ERROR:", err);
             }
+
 
 
 
