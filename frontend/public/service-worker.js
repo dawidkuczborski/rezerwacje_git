@@ -35,27 +35,20 @@ self.addEventListener("notificationclick", (event) => {
     const urlToOpen = event.notification.data?.url || "/";
 
     event.waitUntil(
-        clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+        clients.matchAll({ type: "window", includeUncontrolled: true })
+            .then((clientList) => {
 
-            // 🔥 1) Aplikacja JEST już otwarta → wysyłamy event do SPA
-            for (const client of clientList) {
-                // sprawdzamy tylko okna naszego hosta
-                if (client.url.startsWith(self.location.origin)) {
-                    // pokazujemy okno
-                    client.focus();
-
-                    // wysyłamy wiadomość do React'a
-                    client.postMessage({
-                        type: "OPEN_NOTIFICATION_URL",
-                        url: urlToOpen
-                    });
-
-                    return; // nie otwieramy nowej karty
+                for (const client of clientList) {
+                    // Jeśli PWA/karta jest już otwarta:
+                    if (client.url.startsWith(self.location.origin)) {
+                        // 🔥 To jest klucz – navigate zamiast postMessage
+                        client.focus();
+                        return client.navigate(urlToOpen);
+                    }
                 }
-            }
 
-            // 🔥 2) Jeśli aplikacja NIE jest otwarta → otwieramy nową kartę/tab
-            return clients.openWindow(urlToOpen);
-        })
+                // Jeśli nie ma otwartego okna → nowa karta
+                return clients.openWindow(urlToOpen);
+            })
     );
 });
