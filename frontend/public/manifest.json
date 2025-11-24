@@ -1,6 +1,6 @@
 {
   "name": "Elegant Barber",
-  "short_name": "Apkaa",
+  "short_name": "Elegant Barber",
   "start_url": "/?standalone=true",
   "display": "standalone",
   "orientation": "portrait",
