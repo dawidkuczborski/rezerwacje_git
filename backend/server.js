@@ -1020,6 +1020,9 @@ app.put(
                 try {
                     console.log("🔔 [PUSH CANCEL] Generuję push przy anulowaniu…");
 
+                    // helper do formatowania 14:00:00 → 14:00
+                    const formatTime = (t) => String(t).slice(0, 5);
+
                     // pełne dane wizyty
                     const details = await pool.query(`
             SELECT a.*, u.name AS client_name, s.name AS service_name
@@ -1083,7 +1086,7 @@ app.put(
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
                                 body:
-                                    `${formattedDate} • ${ap.start_time}–${ap.end_time}\n` +
+                                    `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
                                     `${ap.service_name}${addonsText}`,
                                 url: `/employee/appointment/${ap.id}`
                             });
@@ -1095,13 +1098,13 @@ app.put(
                             }
                         }
 
-                        // ⭐ PROVIDER — powiadomienie z informacją o pracowniku
+                        // ⭐ PROVIDER — powiadomienie z dopiskiem o pracowniku
                         if (targetUid === providerUid) {
                             const payload = JSON.stringify({
                                 title: `Anulowano wizytę — ${ap.client_name}`,
                                 body:
                                     `Pracownik: ${employeeName}\n` +
-                                    `${formattedDate} • ${ap.start_time}–${ap.end_time}\n` +
+                                    `${formattedDate} • ${formatTime(ap.start_time)}–${formatTime(ap.end_time)}\n` +
                                     `${ap.service_name}${addonsText}`,
                                 url: `/employee/appointment/${ap.id}`
                             });
@@ -1231,6 +1234,9 @@ app.put(
    🔔 PUSH — zmiana terminu wizyty (pracownik + provider)
 ------------------------------------------------------ */
             try {
+                // helper do formatowania 14:00:00 → 14:00
+                const formatTime = (t) => String(t).slice(0, 5);
+
                 // pobierz aktualne dane po UPDATE
                 const updated = updateRes.rows[0];
 
@@ -1308,8 +1314,8 @@ app.put(
                         const payload = JSON.stringify({
                             title: `Nowy termin — ${clientFullName}`,
                             body:
-                                `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
-                                `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`,
+                                `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
+                                `nowo: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
                             url: `/employee/appointment/${updated.id}`
                         });
 
@@ -1326,8 +1332,8 @@ app.put(
                             title: `Nowy termin — ${clientFullName}`,
                             body:
                                 `Pracownik: ${employeeName}\n` +
-                                `poprzednio: ${prevDate} • ${appt.start_time}–${appt.end_time}\n` +
-                                `nowo: ${newDate} • ${updated.start_time}–${updated.end_time} • ${serviceName}${addonsText}`,
+                                `poprzednio: ${prevDate} • ${formatTime(appt.start_time)}–${formatTime(appt.end_time)}\n` +
+                                `nowo: ${newDate} • ${formatTime(updated.start_time)}–${formatTime(updated.end_time)} • ${serviceName}${addonsText}`,
                             url: `/employee/appointment/${updated.id}`
                         });
 
@@ -1342,6 +1348,7 @@ app.put(
             } catch (err) {
                 console.error("❌ PUSH UPDATE GLOBAL ERROR:", err);
             }
+
 
 
 
