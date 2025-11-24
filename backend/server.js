@@ -6444,12 +6444,14 @@ app.post(
                 for (const row of subs.rows) {
                     const targetUid = row.uid;
 
-                    // ⭐  Wersja dla PRACOWNIKA (bez informacji o pracowniku)
+                    // ⭐ Wersja dla pracownika
                     if (targetUid === employeeUid) {
                         const payload = JSON.stringify({
                             title: `Nowa wizyta – ${clientFullName}`,
                             body: `${formattedDate} • ${start_time}–${end_time}\n${serviceName}${addonsText}`,
-                            url: `/employee/appointment/${appointmentId}`,
+
+                            // 🔥 NOWY LINK DO NOWEGO MODALA
+                            url: `/notification/appointment/${appointmentId}`,
                         });
 
                         try {
@@ -6459,7 +6461,7 @@ app.post(
                         }
                     }
 
-                    // ⭐  Wersja dla PROVIDERA (z informacją o pracowniku)
+                    // ⭐ Wersja dla providera
                     if (targetUid === providerUid) {
                         const payload = JSON.stringify({
                             title: `Nowa wizyta – ${clientFullName}`,
@@ -6467,7 +6469,9 @@ app.post(
                                 `Pracownik: ${employeeName}\n` +
                                 `${formattedDate} • ${start_time}–${end_time}\n` +
                                 `${serviceName}${addonsText}`,
-                            url: `/employee/appointment/${appointmentId}`,
+
+                            // 🔥 TEN SAM LINK
+                            url: `/notification/appointment/${appointmentId}`,
                         });
 
                         try {
@@ -6481,6 +6485,7 @@ app.post(
             } catch (err) {
                 console.error("❌ GLOBAL PUSH ERROR:", err);
             }
+
 
 
 
@@ -6512,7 +6517,55 @@ app.post(
         }
     })
 );
+////modal powiadomień///
+app.get(
+    "/api/appointments/:id/notification-details",
+    verifyToken,
+    asyncHandler(async (req, res) => {
+        const { id } = req.params;
 
+        const q = `
+            SELECT 
+                a.id,
+                a.date,
+                a.start_time,
+                a.end_time,
+                a.status,
+                a.previous_date,
+                a.previous_start_time,
+                a.previous_end_time,
+                a.changed_at,
+
+                s.name AS service_name,
+                s.price AS service_price,
+
+                e.name AS employee_name,
+
+                u.name AS client_name,
+                u.phone AS client_phone,
+
+                (
+                    SELECT json_agg(json_build_object('id', sa.id, 'name', sa.name, 'price', sa.price))
+                    FROM appointment_addons aa
+                    JOIN service_addons sa ON sa.id = aa.addon_id
+                    WHERE aa.appointment_id = a.id
+                ) AS addons
+            FROM appointments a
+            LEFT JOIN services s ON s.id = a.service_id
+            LEFT JOIN employees e ON e.id = a.employee_id
+            LEFT JOIN users u ON u.uid = a.client_uid
+            WHERE a.id = $1
+        `;
+
+        const result = await pool.query(q, [id]);
+
+        if (!result.rows.length) {
+            return res.status(404).json({ error: "Wizyta nie istnieje" });
+        }
+
+        res.json(result.rows[0]);
+    })
+);
 
 
 

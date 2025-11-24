@@ -444,18 +444,23 @@ export default function PanelSettings() {
                                                     <button
                                                         onClick={handleTogglePush}
                                                         disabled={pushLoading}
-                                                        className={`relative inline-flex items-center justify-center w-11 h-6 rounded-full transition-colors ${pushEnabled ? "bg-[#e57b2c]" : "bg-gray-400"
-                                                            } ${pushLoading
-                                                                ? "opacity-60 cursor-wait"
-                                                                : "cursor-pointer"
-                                                            }`}
+                                                        className={`
+        relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer 
+        rounded-full border-2 border-transparent transition-colors 
+        duration-300 ease-in-out 
+        ${pushEnabled ? "bg-[#e57b2c]" : "bg-gray-400"} 
+        ${pushLoading ? "opacity-60 cursor-wait" : ""}
+    `}
                                                     >
                                                         <span
-                                                            className={`absolute w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform ${pushEnabled ? "translate-x-5" : "translate-x-1"
-                                                                }`}
+                                                            className={`
+            pointer-events-none inline-block h-5 w-5 transform rounded-full 
+            bg-white shadow transition duration-300 ease-in-out
+            ${pushEnabled ? "translate-x-6" : "translate-x-0"}
+        `}
                                                         />
-
                                                     </button>
+
                                                 </div>
                                             )}
                                         </motion.div>
